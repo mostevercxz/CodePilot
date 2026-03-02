@@ -79,6 +79,19 @@ jobs:
           printf '%s' "$MAC_CERT_P12_BASE64" | tr -d '\r\n' | base64 --decode > /tmp/cert.p12
           openssl pkcs12 -in /tmp/cert.p12 -passin pass:"$MAC_CERT_PASSWORD" -noout
 
+      - name: Validate notarization credentials
+        if: ${{ env.HAS_CERT == 'true' }}
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          echo "APPLE_ID len=${#APPLE_ID}, TEAM=$APPLE_TEAM_ID, APP_PWD len=${#APPLE_APP_SPECIFIC_PASSWORD}"
+          xcrun notarytool history \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" >/dev/null
+
       - name: Package for macOS (x64 + arm64)
         env:
           CSC_LINK: ${{ env.HAS_CERT == 'true' && '/tmp/cert.p12' || '' }}
