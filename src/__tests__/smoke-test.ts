@@ -1,5 +1,8 @@
 /**
- * Smoke test script -- run with: npx tsx src/__tests__/smoke-test.ts
+ * @deprecated Use the Playwright version instead: npx playwright test --grep @smoke
+ * See: src/__tests__/e2e/smoke.spec.ts
+ *
+ * Legacy smoke test script -- run with: npx tsx src/__tests__/smoke-test.ts
  * Tests basic page rendering for all routes.
  */
 import { chromium } from 'playwright';

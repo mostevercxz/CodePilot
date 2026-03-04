@@ -13,6 +13,8 @@ on:
           - windows
           - macos
           - linux
+  pull_request:
+    branches: [main]
   push:
     tags:
       - "v*"
@@ -21,7 +23,32 @@ permissions:
   contents: write
 
 jobs:
+  lint-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        # TODO: fix 4 existing lint errors then remove continue-on-error
+        continue-on-error: true
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm run test:unit
+
   build-windows:
+    needs: [lint-test]
     if: ${{ github.event_name == 'push' || inputs.platform == 'all' || inputs.platform == 'windows' }}
     runs-on: windows-latest
     steps:
@@ -50,6 +77,7 @@ jobs:
           retention-days: 3
 
   build-macos:
+    needs: [lint-test]
     if: ${{ github.event_name == 'push' || inputs.platform == 'all' || inputs.platform == 'macos' }}
     runs-on: macos-latest
     env:
@@ -132,6 +160,7 @@ jobs:
           retention-days: 3
 
   build-linux:
+    needs: [lint-test]
     if: ${{ github.event_name == 'push' || inputs.platform == 'all' || inputs.platform == 'linux' }}
     runs-on: ubuntu-latest
     strategy:

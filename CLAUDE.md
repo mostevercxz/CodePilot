@@ -38,3 +38,13 @@ CodePilot — Claude Code 的桌面 GUI 客户端，基于 Electron + Next.js。
 - `docs/research/` — 调研文档（技术方案、可行性分析）
 
 **检索前先读对应目录的 README.md；增删文件后更新索引。**
+
+## 自检命令
+
+**自检命令（pre-commit hook 会自动执行前三项）：**
+- `npm run test` — typecheck + 单元测试（~4s，无需 dev server）
+- `npm run test:smoke` — 冒烟测试（~15s，需要 dev server）
+- `npm run test:e2e` — 完整 E2E（~60s+，需要 dev server）
+
+修改代码后，commit 前至少确保 `npm run test` 通过。
+涉及 UI 改动时额外运行 `npm run test:smoke`。
