@@ -540,11 +540,13 @@ export function getDefaultModelsForProvider(
 ): CatalogModel[] {
   // Try to find a preset by base_url
   const preset = VENDOR_PRESETS.find(p => p.baseUrl && p.baseUrl === baseUrl);
-  if (preset && preset.defaultModels.length > 0) {
+  if (preset) {
+    // Preset matched — return its models even if empty (e.g. Volcengine
+    // requires users to specify their own model names, so defaultModels is []).
     return preset.defaultModels;
   }
 
-  // Protocol-based defaults
+  // Protocol-based defaults (only when no preset matched)
   if (protocol === 'anthropic' || protocol === 'openrouter' || protocol === 'bedrock' || protocol === 'vertex') {
     return ANTHROPIC_DEFAULT_MODELS;
   }

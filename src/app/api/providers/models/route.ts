@@ -128,14 +128,14 @@ export async function GET() {
         capabilities: m.capabilities as Record<string, unknown> | undefined,
       }));
 
-      // Start with DB models + catalog defaults
+      // Start with DB models + catalog defaults.
+      // If both are empty (e.g. Volcengine where user must specify model names),
+      // leave rawModels empty — do NOT fall back to DEFAULT_MODELS (Sonnet/Opus/Haiku).
       if (dbModels.length > 0) {
         const dbIds = new Set(dbModels.map(m => m.value));
         rawModels = [...dbModels, ...catalogRaw.filter(m => !dbIds.has(m.value))];
-      } else if (catalogRaw.length > 0) {
-        rawModels = [...catalogRaw];
       } else {
-        rawModels = [...DEFAULT_MODELS];
+        rawModels = [...catalogRaw];
       }
 
       // Inject role_models_json.default into the list if not already present
