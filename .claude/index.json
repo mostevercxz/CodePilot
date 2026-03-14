@@ -1,0 +1,180 @@
+{
+  "timestamp": "2026-03-14T17:36:08+08:00",
+  "project": "CodePilot",
+  "version": "0.35.0",
+  "description": "Claude Code Desktop GUI Client (Electron + Next.js)",
+  "modules": [
+    {
+      "name": "Main App",
+      "path": "src/",
+      "language": "TypeScript/React",
+      "entry_files": [
+        "src/app/layout.tsx",
+        "src/app/page.tsx",
+        "src/lib/claude-client.ts",
+        "src/lib/db.ts"
+      ],
+      "api_routes": "src/app/api/ (~90 route.ts files)",
+      "interfaces": [
+        "src/app/api/chat/messages/route.ts",
+        "src/app/api/chat/sessions/route.ts",
+        "src/app/api/plugins/mcp/route.ts",
+        "src/app/api/media/generate/route.ts",
+        "src/app/api/bridge/route.ts",
+        "src/app/api/files/route.ts",
+        "src/app/api/git/status/route.ts",
+        "src/app/api/settings/route.ts",
+        "src/app/api/skills/route.ts",
+        "src/app/api/providers/route.ts",
+        "src/app/api/workspace/index/route.ts"
+      ],
+      "test_dirs": [
+        "src/__tests__/unit/",
+        "src/__tests__/e2e/"
+      ],
+      "config_files": [
+        "next.config.ts",
+        "tsconfig.json",
+        "tailwind.config.ts",
+        "postcss.config.mjs",
+        "eslint.config.mjs",
+        "playwright.config.ts",
+        "components.json"
+      ],
+      "important_paths": [
+        "src/lib/claude-client.ts",
+        "src/lib/stream-session-manager.ts",
+        "src/lib/conversation-registry.ts",
+        "src/lib/db.ts",
+        "src/lib/provider-resolver.ts",
+        "src/lib/bridge/bridge-manager.ts",
+        "src/lib/image-generator.ts",
+        "src/lib/theme/loader.ts",
+        "src/types/index.ts",
+        "src/i18n/en.ts",
+        "src/i18n/zh.ts",
+        "src/hooks/useSSEStream.ts",
+        "src/components/layout/AppShell.tsx",
+        "src/components/chat/ChatView.tsx"
+      ],
+      "coverage": {
+        "entry": true,
+        "interfaces": true,
+        "dependencies": true,
+        "data_model": true,
+        "tests": true,
+        "quality_tools": true
+      },
+      "gaps": []
+    },
+    {
+      "name": "Electron Shell",
+      "path": "electron/",
+      "language": "TypeScript",
+      "entry_files": [
+        "electron/main.ts",
+        "electron/preload.ts"
+      ],
+      "interfaces": [
+        "IPC channels (install, updater, terminal, open-external, select-folder)"
+      ],
+      "test_dirs": [],
+      "config_files": [
+        "electron/tsconfig.json",
+        "electron-builder.yml"
+      ],
+      "important_paths": [
+        "electron/main.ts",
+        "electron/preload.ts",
+        "electron/updater.ts",
+        "electron/terminal-manager.ts",
+        "scripts/build-electron.mjs",
+        "scripts/after-pack.js"
+      ],
+      "coverage": {
+        "entry": true,
+        "interfaces": true,
+        "dependencies": true,
+        "data_model": true,
+        "tests": false,
+        "quality_tools": true
+      },
+      "gaps": [
+        "No dedicated unit tests for Electron module"
+      ]
+    },
+    {
+      "name": "Docs Site",
+      "path": "apps/site/",
+      "language": "TypeScript/React",
+      "entry_files": [
+        "apps/site/src/app/[lang]/layout.tsx",
+        "apps/site/src/app/[lang]/(marketing)/page.tsx"
+      ],
+      "interfaces": [
+        "apps/site/src/app/api/search/route.ts"
+      ],
+      "test_dirs": [],
+      "config_files": [
+        "apps/site/package.json",
+        "apps/site/next.config.mjs",
+        "apps/site/source.config.ts",
+        "apps/site/tsconfig.json"
+      ],
+      "important_paths": [
+        "apps/site/content/docs/en/",
+        "apps/site/content/docs/zh/",
+        "apps/site/content/marketing/",
+        "apps/site/src/components/marketing/",
+        "apps/site/src/components/docs/",
+        "apps/site/src/lib/i18n.ts"
+      ],
+      "coverage": {
+        "entry": true,
+        "interfaces": true,
+        "dependencies": true,
+        "data_model": true,
+        "tests": false,
+        "quality_tools": true
+      },
+      "gaps": [
+        "No test suite for docs site"
+      ]
+    }
+  ],
+  "scan_stats": {
+    "estimated_total_files": 320,
+    "scanned_files": 290,
+    "coverage_percent": 90,
+    "ignored_patterns": [
+      "node_modules/**",
+      ".git/**",
+      ".next/**",
+      "dist-electron/**",
+      "release/**",
+      "coverage/**",
+      "data/**",
+      "*.lock",
+      ".codepilot-uploads/**",
+      "apps/site/.next/**",
+      "apps/site/.source/**",
+      "apps/site/node_modules/**"
+    ],
+    "skipped_binary": [
+      "docs/icon-readme.png",
+      "docs/screenshot.png",
+      "docs/wechat-group-qr.png",
+      "apps/site/src/app/icon.png",
+      "apps/site/src/app/fonts/*.woff2",
+      "apps/site/public/favicon.ico",
+      "apps/site/public/icon-192.png"
+    ]
+  },
+  "truncated": false,
+  "gap_summary": [
+    "Electron module has no dedicated unit tests",
+    "Docs site (apps/site) has no test suite",
+    "packages/ workspace directory declared in package.json but currently empty"
+  ],
+  "next_steps": []
+}

@@ -3,6 +3,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
 import type { ErrorResponse } from '@/types';
+import { sshManager } from '@/lib/remote/ssh-manager';
 
 async function getWindowsDrives(): Promise<string[]> {
   if (process.platform !== 'win32') return [];
@@ -22,6 +23,27 @@ async function getWindowsDrives(): Promise<string[]> {
 // List only directories for folder browsing (no safety restriction since user is choosing where to work)
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
+  const connectionId = searchParams.get('connection_id');
+
+  // Remote directory browsing
+  if (connectionId) {
+    const dir = searchParams.get('dir') || '~';
+    const tunnelPort = sshManager.getTunnelPort(connectionId);
+    if (!tunnelPort) {
+      return NextResponse.json<ErrorResponse>({ error: 'Not connected to remote' }, { status: 400 });
+    }
+    try {
+      const resp = await fetch(`http://127.0.0.1:${tunnelPort}/files/browse?dir=${encodeURIComponent(dir)}`);
+      const data = await resp.json();
+      return NextResponse.json(data);
+    } catch (error) {
+      return NextResponse.json<ErrorResponse>(
+        { error: error instanceof Error ? error.message : 'Failed to browse remote' },
+        { status: 500 }
+      );
+    }
+  }
+
   const dir = searchParams.get('dir') || os.homedir();
 
   const resolvedDir = path.resolve(dir);

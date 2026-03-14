@@ -6,6 +6,7 @@ import {
   Bell,
   Columns,
   X,
+  Globe,
 } from "@/components/ui/icon";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -100,6 +101,9 @@ export function SessionListItem({
         </span>
         <div className="flex-1 min-w-0">
           <span className="line-clamp-1 text-[13px] font-medium leading-tight break-all">
+            {(session as ChatSession & { connection_id?: string }).connection_id && (
+              <Globe size={10} className="mr-1 inline-block text-muted-foreground" />
+            )}
             {session.title}
           </span>
         </div>

@@ -10,6 +10,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import type { MCPServerConfig } from '@/types';
+import { streamClaudeRemote } from '@/lib/remote/remote-claude-client';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -337,33 +338,47 @@ Start by greeting the user and asking the first question.
       systemPromptLength: finalSystemPrompt?.length || 0,
       systemPromptFirst200: finalSystemPrompt?.slice(0, 200) || 'none',
     });
-    const stream = streamClaude({
-      prompt: content,
-      sessionId: session_id,
-      sdkSessionId: session.sdk_session_id || undefined,
-      model: resolved.upstreamModel || resolved.model || effectiveModel,
-      systemPrompt: finalSystemPrompt,
-      workingDirectory: session.sdk_cwd || session.working_directory || undefined,
-      abortController,
-      permissionMode,
-      files: fileAttachments,
-      imageAgentMode: !!systemPromptAppend,
-      toolTimeoutSeconds: toolTimeout || 300,
-      provider: resolvedProvider,
-      providerId: effectiveProviderId || undefined,
-      sessionProviderId: session.provider_id || undefined,
-      mcpServers,
-      conversationHistory: historyMsgs,
-      bypassPermissions: session.permission_profile === 'full_access',
-      thinking: thinking as ClaudeStreamOptions['thinking'],
-      effort: effort as ClaudeStreamOptions['effort'],
-      context1m: context_1m,
-      enableFileCheckpointing: enableFileCheckpointing ?? (effectiveMode === 'code'),
-      autoTrigger: !!autoTrigger,
-      onRuntimeStatusChange: (status: string) => {
-        try { setSessionRuntimeStatus(session_id, status); } catch { /* best effort */ }
-      },
-    });
+    // Route to remote or local based on connection_id
+    const isRemote = !!(session as { connection_id?: string }).connection_id;
+    const stream = isRemote
+      ? streamClaudeRemote({
+          prompt: content,
+          sessionId: session_id,
+          sdkSessionId: session.sdk_session_id || undefined,
+          workingDirectory: session.sdk_cwd || session.working_directory || undefined,
+          model: resolved.upstreamModel || resolved.model || effectiveModel,
+          mode: effectiveMode,
+          permissionMode,
+          connectionId: (session as { connection_id: string }).connection_id,
+          abortController,
+        })
+      : streamClaude({
+          prompt: content,
+          sessionId: session_id,
+          sdkSessionId: session.sdk_session_id || undefined,
+          model: resolved.upstreamModel || resolved.model || effectiveModel,
+          systemPrompt: finalSystemPrompt,
+          workingDirectory: session.sdk_cwd || session.working_directory || undefined,
+          abortController,
+          permissionMode,
+          files: fileAttachments,
+          imageAgentMode: !!systemPromptAppend,
+          toolTimeoutSeconds: toolTimeout || 300,
+          provider: resolvedProvider,
+          providerId: effectiveProviderId || undefined,
+          sessionProviderId: session.provider_id || undefined,
+          mcpServers,
+          conversationHistory: historyMsgs,
+          bypassPermissions: session.permission_profile === 'full_access',
+          thinking: thinking as ClaudeStreamOptions['thinking'],
+          effort: effort as ClaudeStreamOptions['effort'],
+          context1m: context_1m,
+          enableFileCheckpointing: enableFileCheckpointing ?? (effectiveMode === 'code'),
+          autoTrigger: !!autoTrigger,
+          onRuntimeStatusChange: (status: string) => {
+            try { setSessionRuntimeStatus(session_id, status); } catch { /* best effort */ }
+          },
+        });
 
     // Tee the stream: one for client, one for collecting the response
     const [streamForClient, streamForCollect] = stream.tee();

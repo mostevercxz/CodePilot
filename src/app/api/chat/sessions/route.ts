@@ -27,14 +27,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Validate directory actually exists on disk
-    try {
-      await fs.access(body.working_directory);
-    } catch {
-      return Response.json(
-        { error: 'Directory does not exist', code: 'INVALID_DIRECTORY' },
-        { status: 400 },
-      );
+    // For remote sessions, skip local directory validation
+    if (!body.connection_id) {
+      // Validate directory actually exists on disk (local sessions only)
+      try {
+        await fs.access(body.working_directory);
+      } catch {
+        return Response.json(
+          { error: 'Directory does not exist', code: 'INVALID_DIRECTORY' },
+          { status: 400 },
+        );
+      }
     }
 
     const session = createSession(
@@ -45,6 +48,7 @@ export async function POST(request: NextRequest) {
       body.mode,
       body.provider_id,
       body.permission_profile,
+      body.connection_id,
     );
     const response: SessionResponse = { session };
     return Response.json(response, { status: 201 });

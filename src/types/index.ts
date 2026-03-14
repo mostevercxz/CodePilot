@@ -22,6 +22,38 @@ export interface ChatSession {
   runtime_updated_at: string;
   runtime_error: string;
   permission_profile?: 'default' | 'full_access';
+  connection_id: string;
+}
+
+// ==========================================
+// Remote Connection Types
+// ==========================================
+
+export type RemoteAuthMethod = 'key' | 'password' | 'agent';
+export type RemoteConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
+
+export interface RemoteConnection {
+  id: string;
+  name: string;
+  host: string;
+  port: number;
+  username: string;
+  auth_method: RemoteAuthMethod;
+  private_key_path: string;
+  password_encrypted: string;
+  claude_binary_path: string;
+  default_working_directory: string;
+  created_at: string;
+  updated_at: string;
+  last_connected_at: string;
+}
+
+export interface RemoteConnectionRuntime {
+  connectionId: string;
+  status: RemoteConnectionStatus;
+  tunnelPort: number | null;
+  error: string | null;
+  connectedAt: number | null;
 }
 
 // ==========================================
@@ -287,6 +319,7 @@ export interface CreateSessionRequest {
   mode?: string;
   provider_id?: string;
   permission_profile?: string;
+  connection_id?: string;
 }
 
 export interface SendMessageRequest {

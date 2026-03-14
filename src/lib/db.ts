@@ -3,7 +3,7 @@ import path from 'path';
 import crypto from 'crypto';
 import fs from 'fs';
 import os from 'os';
-import type { ChatSession, Message, SettingsMap, TaskItem, TaskStatus, ApiProvider, CreateProviderRequest, UpdateProviderRequest, MediaJob, MediaJobStatus, MediaJobItem, MediaJobItemStatus, MediaContextEvent, BatchConfig } from '@/types';
+import type { ChatSession, Message, SettingsMap, TaskItem, TaskStatus, ApiProvider, CreateProviderRequest, UpdateProviderRequest, MediaJob, MediaJobStatus, MediaJobItem, MediaJobItemStatus, MediaContextEvent, BatchConfig, RemoteConnection } from '@/types';
 import type { ChannelType, ChannelBinding } from './bridge/types';
 import { getLocalDateString, localDayStartAsUTC } from './utils';
 
@@ -190,6 +190,22 @@ function initDb(db: Database.Database): void {
       FOREIGN KEY (job_id) REFERENCES media_jobs(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS remote_connections (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      host TEXT NOT NULL,
+      port INTEGER NOT NULL DEFAULT 22,
+      username TEXT NOT NULL,
+      auth_method TEXT NOT NULL DEFAULT 'key' CHECK(auth_method IN ('key', 'password', 'agent')),
+      private_key_path TEXT NOT NULL DEFAULT '',
+      password_encrypted TEXT NOT NULL DEFAULT '',
+      claude_binary_path TEXT NOT NULL DEFAULT '',
+      default_working_directory TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      last_connected_at TEXT NOT NULL DEFAULT ''
+    );
+
     CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id);
     CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at);
     CREATE INDEX IF NOT EXISTS idx_sessions_updated_at ON chat_sessions(updated_at);
@@ -336,6 +352,10 @@ function migrateDb(db: Database.Database): void {
     db.exec("ALTER TABLE chat_sessions ADD COLUMN permission_profile TEXT NOT NULL DEFAULT 'default'");
   }
   db.exec("CREATE INDEX IF NOT EXISTS idx_sessions_runtime_status ON chat_sessions(runtime_status)");
+
+  if (!colNames.includes('connection_id')) {
+    db.exec("ALTER TABLE chat_sessions ADD COLUMN connection_id TEXT NOT NULL DEFAULT ''");
+  }
 
   // Migrate is_active provider to default_provider_id setting
   const defaultProviderSetting = db.prepare("SELECT value FROM settings WHERE key = 'default_provider_id'").get() as { value: string } | undefined;
@@ -732,6 +752,7 @@ export function createSession(
   mode?: string,
   providerId?: string,
   permissionProfile?: string,
+  connectionId?: string,
 ): ChatSession {
   const db = getDb();
   const id = crypto.randomBytes(16).toString('hex');
@@ -740,8 +761,8 @@ export function createSession(
   const projectName = path.basename(wd);
 
   db.prepare(
-    'INSERT INTO chat_sessions (id, title, created_at, updated_at, model, system_prompt, working_directory, sdk_session_id, project_name, status, mode, sdk_cwd, provider_id, permission_profile) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-  ).run(id, title || 'New Chat', now, now, model || '', systemPrompt || '', wd, '', projectName, 'active', mode || 'code', wd, providerId || '', permissionProfile || 'default');
+    'INSERT INTO chat_sessions (id, title, created_at, updated_at, model, system_prompt, working_directory, sdk_session_id, project_name, status, mode, sdk_cwd, provider_id, permission_profile, connection_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+  ).run(id, title || 'New Chat', now, now, model || '', systemPrompt || '', wd, '', projectName, 'active', mode || 'code', wd, providerId || '', permissionProfile || 'default', connectionId || '');
 
   return getSession(id)!;
 }
@@ -788,6 +809,83 @@ export function updateSessionProvider(id: string, providerName: string): void {
 export function updateSessionProviderId(id: string, providerId: string): void {
   const db = getDb();
   db.prepare('UPDATE chat_sessions SET provider_id = ? WHERE id = ?').run(providerId, id);
+}
+
+// ==========================================
+// Remote Connection CRUD
+// ==========================================
+
+export function createRemoteConnection(data: {
+  name: string;
+  host: string;
+  port?: number;
+  username: string;
+  auth_method?: string;
+  private_key_path?: string;
+  password_encrypted?: string;
+  claude_binary_path?: string;
+  default_working_directory?: string;
+}): RemoteConnection {
+  const db = getDb();
+  const id = crypto.randomBytes(16).toString('hex');
+  const now = new Date().toISOString().replace('T', ' ').split('.')[0];
+  db.prepare(
+    `INSERT INTO remote_connections (id, name, host, port, username, auth_method, private_key_path, password_encrypted, claude_binary_path, default_working_directory, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    id, data.name, data.host, data.port || 22, data.username,
+    data.auth_method || 'key', data.private_key_path || '', data.password_encrypted || '',
+    data.claude_binary_path || '', data.default_working_directory || '', now, now
+  );
+  return getRemoteConnection(id)!;
+}
+
+export function getRemoteConnection(id: string): RemoteConnection | undefined {
+  const db = getDb();
+  return db.prepare('SELECT * FROM remote_connections WHERE id = ?').get(id) as RemoteConnection | undefined;
+}
+
+export function listRemoteConnections(): RemoteConnection[] {
+  const db = getDb();
+  return db.prepare('SELECT * FROM remote_connections ORDER BY updated_at DESC').all() as RemoteConnection[];
+}
+
+export function updateRemoteConnection(id: string, data: Partial<{
+  name: string;
+  host: string;
+  port: number;
+  username: string;
+  auth_method: string;
+  private_key_path: string;
+  password_encrypted: string;
+  claude_binary_path: string;
+  default_working_directory: string;
+}>): RemoteConnection | undefined {
+  const db = getDb();
+  const now = new Date().toISOString().replace('T', ' ').split('.')[0];
+  const fields: string[] = ['updated_at = ?'];
+  const values: unknown[] = [now];
+  for (const [key, value] of Object.entries(data)) {
+    if (value !== undefined) {
+      fields.push(`${key} = ?`);
+      values.push(value);
+    }
+  }
+  values.push(id);
+  db.prepare(`UPDATE remote_connections SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+  return getRemoteConnection(id);
+}
+
+export function deleteRemoteConnection(id: string): boolean {
+  const db = getDb();
+  const result = db.prepare('DELETE FROM remote_connections WHERE id = ?').run(id);
+  return result.changes > 0;
+}
+
+export function updateRemoteConnectionLastConnected(id: string): void {
+  const db = getDb();
+  const now = new Date().toISOString().replace('T', ' ').split('.')[0];
+  db.prepare('UPDATE remote_connections SET last_connected_at = ?, updated_at = ? WHERE id = ?').run(now, now, id);
 }
 
 export function getDefaultProviderId(): string | undefined {
