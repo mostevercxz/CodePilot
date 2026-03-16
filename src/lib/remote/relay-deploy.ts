@@ -50,8 +50,15 @@ export async function deployRelay(ssh: Client, conn: RemoteConnection): Promise<
   // Kill any existing relay process
   await sshExec(ssh, `pkill -f "node.*codepilot-relay" 2>/dev/null || true`);
 
-  // Source user profile to get PATH (nvm, etc.) for non-interactive SSH sessions
-  const sourceProfile = 'source ~/.bashrc 2>/dev/null; source ~/.profile 2>/dev/null; source ~/.nvm/nvm.sh 2>/dev/null;';
+  // Source user profile to get PATH (nvm, etc.) for non-interactive SSH sessions.
+  // Many .bashrc files have an early `return` for non-interactive shells,
+  // so we also eval export lines directly from .bashrc as a fallback.
+  const sourceProfile = [
+    'source ~/.profile 2>/dev/null',
+    'source ~/.nvm/nvm.sh 2>/dev/null',
+    // Force-eval export lines from .bashrc even in non-interactive mode
+    'eval "$(grep -E "^export\\s+" ~/.bashrc 2>/dev/null)" 2>/dev/null',
+  ].join('; ') + ';';
 
   // Verify node is accessible
   const nodeCheck = await sshExec(ssh, `${sourceProfile} which node 2>/dev/null || echo "NOT_FOUND"`);
@@ -82,10 +89,10 @@ export async function deployRelay(ssh: Client, conn: RemoteConnection): Promise<
   }
   console.log(`[relay-deploy] Remote proxy: ${proxyParts}`);
 
-  // Start relay in a login shell so it inherits full env (PATH, proxy, nvm, etc.)
-  // The relay process itself needs PATH to resolve commands called by claude
+  // Start relay with full env (PATH, proxy, nvm, etc.)
+  // Use sourceProfile + bash -l to cover all profile/bashrc patterns
   const startResult = await sshExec(ssh,
-    `bash -l -c 'cd ${RELAY_DIR} && CLAUDE_BINARY="${claudePath}" nohup ${nodePath} ${RELAY_SCRIPT} > relay.log 2>&1 & sleep 1 && cat relay.port 2>/dev/null || echo "FAILED"'`
+    `${sourceProfile} cd ${RELAY_DIR} && CLAUDE_BINARY="${claudePath}" nohup ${nodePath} ${RELAY_SCRIPT} > relay.log 2>&1 & sleep 1 && cat relay.port 2>/dev/null || echo "FAILED"`
   );
 
   const port = parseInt(startResult.trim(), 10);
