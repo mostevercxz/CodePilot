@@ -499,6 +499,8 @@ async function main() {
     relayLog(`v${RELAY_VERSION} listening on 127.0.0.1:${port}`);
     relayLog(`CLAUDE_BINARY=${CLAUDE_BINARY}`);
     relayLog(`PATH=${process.env.PATH}`);
+    relayLog(`http_proxy=${process.env.http_proxy || process.env.HTTP_PROXY || '(not set)'}`);
+    relayLog(`https_proxy=${process.env.https_proxy || process.env.HTTPS_PROXY || '(not set)'}`);
   });
 
   // Graceful shutdown

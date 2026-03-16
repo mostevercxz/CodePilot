@@ -61,16 +61,19 @@ export async function deployRelay(ssh: Client, conn: RemoteConnection): Promise<
   const nodePath = nodeCheck.trim();
   console.log(`[relay-deploy] Remote node path: ${nodePath}`);
 
-  // Verify Claude CLI is accessible
-  const claudePath = conn.claude_binary_path || 'claude';
-  const whichResult = await sshExec(ssh, `${sourceProfile} which ${claudePath} 2>/dev/null || echo "NOT_FOUND"`);
+  // Verify Claude CLI is accessible and resolve full path
+  const claudePathInput = conn.claude_binary_path || 'claude';
+  const whichResult = await sshExec(ssh, `${sourceProfile} which ${claudePathInput} 2>/dev/null || echo "NOT_FOUND"`);
   if (whichResult.trim() === 'NOT_FOUND' || whichResult.trim() === '') {
-    throw new Error(`Claude CLI not found on remote at "${claudePath}". Please install Claude Code CLI or specify the correct path.`);
+    throw new Error(`Claude CLI not found on remote at "${claudePathInput}". Please install Claude Code CLI or specify the correct path.`);
   }
+  const claudePath = whichResult.trim();
+  console.log(`[relay-deploy] Remote claude path: ${claudePath}`);
 
-  // Start relay on a random available port (use full node path to avoid PATH issues)
+  // Start relay with full profile sourced (for PATH, proxy env vars, etc.)
+  // Use full paths for both node and claude to avoid PATH issues
   const startResult = await sshExec(ssh,
-    `cd ${RELAY_DIR} && CLAUDE_BINARY="${claudePath}" nohup ${nodePath} ${RELAY_SCRIPT} > relay.log 2>&1 & sleep 1 && cat relay.port 2>/dev/null || echo "FAILED"`
+    `${sourceProfile} cd ${RELAY_DIR} && CLAUDE_BINARY="${claudePath}" nohup ${nodePath} ${RELAY_SCRIPT} > relay.log 2>&1 & sleep 1 && cat relay.port 2>/dev/null || echo "FAILED"`
   );
 
   const port = parseInt(startResult.trim(), 10);
