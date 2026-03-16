@@ -201,6 +201,7 @@ function initDb(db: Database.Database): void {
       password_encrypted TEXT NOT NULL DEFAULT '',
       claude_binary_path TEXT NOT NULL DEFAULT '',
       default_working_directory TEXT NOT NULL DEFAULT '',
+      env_vars TEXT NOT NULL DEFAULT '{}',
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
       last_connected_at TEXT NOT NULL DEFAULT ''
@@ -356,6 +357,14 @@ function migrateDb(db: Database.Database): void {
   if (!colNames.includes('connection_id')) {
     db.exec("ALTER TABLE chat_sessions ADD COLUMN connection_id TEXT NOT NULL DEFAULT ''");
   }
+
+  // Add env_vars column to remote_connections
+  try {
+    const rcCols = db.prepare("PRAGMA table_info(remote_connections)").all() as { name: string }[];
+    if (rcCols.length > 0 && !rcCols.some(c => c.name === 'env_vars')) {
+      db.exec("ALTER TABLE remote_connections ADD COLUMN env_vars TEXT NOT NULL DEFAULT '{}'");
+    }
+  } catch { /* table may not exist yet */ }
 
   // Migrate is_active provider to default_provider_id setting
   const defaultProviderSetting = db.prepare("SELECT value FROM settings WHERE key = 'default_provider_id'").get() as { value: string } | undefined;
@@ -825,17 +834,19 @@ export function createRemoteConnection(data: {
   password_encrypted?: string;
   claude_binary_path?: string;
   default_working_directory?: string;
+  env_vars?: string;
 }): RemoteConnection {
   const db = getDb();
   const id = crypto.randomBytes(16).toString('hex');
   const now = new Date().toISOString().replace('T', ' ').split('.')[0];
   db.prepare(
-    `INSERT INTO remote_connections (id, name, host, port, username, auth_method, private_key_path, password_encrypted, claude_binary_path, default_working_directory, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO remote_connections (id, name, host, port, username, auth_method, private_key_path, password_encrypted, claude_binary_path, default_working_directory, env_vars, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     id, data.name, data.host, data.port || 22, data.username,
     data.auth_method || 'key', data.private_key_path || '', data.password_encrypted || '',
-    data.claude_binary_path || '', data.default_working_directory || '', now, now
+    data.claude_binary_path || '', data.default_working_directory || '',
+    data.env_vars || '{}', now, now
   );
   return getRemoteConnection(id)!;
 }

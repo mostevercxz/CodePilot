@@ -3,7 +3,7 @@ import type { RemoteConnection } from '@/types';
 import fs from 'fs';
 import path from 'path';
 
-export const RELAY_VERSION = '1.2.0';
+export const RELAY_VERSION = '1.3.0';
 const RELAY_DIR = '~/.codepilot-relay';
 const RELAY_SCRIPT = 'relay.js';
 
@@ -60,72 +60,56 @@ export async function deployRelay(ssh: Client, conn: RemoteConnection): Promise<
     'eval "$(grep -E "^export\\s+" ~/.bashrc 2>/dev/null)" 2>/dev/null',
   ].join('; ') + ';';
 
-  // Resolve claude to the real binary, skipping shell wrappers.
-  // Also search nvm bin directories explicitly since nvm.sh may not
-  // activate properly in non-interactive SSH.
+  // Resolve claude to the real binary (skip shell wrappers).
+  // Search PATH + nvm bin dirs explicitly.
   const claudePathInput = conn.claude_binary_path || 'claude';
-  const resolveScript = `
+  const resolveResult = await sshExec(ssh, `
     ${sourceProfile}
-    # Build candidate list: PATH matches + nvm bin dirs
     CANDIDATES=$(which -a ${claudePathInput} 2>/dev/null)
     for d in $HOME/.nvm/versions/node/*/bin; do
-      if [ -x "$d/${claudePathInput}" ]; then
-        CANDIDATES="$CANDIDATES $d/${claudePathInput}"
-      fi
+      [ -x "$d/${claudePathInput}" ] && CANDIDATES="$CANDIDATES $d/${claudePathInput}"
     done
-    FOUND=""
     for c in $CANDIDATES; do
       ftype=$(file -b "$c" 2>/dev/null)
-      case "$ftype" in
-        *script*) ;;
-        *) FOUND="$c"; break ;;
-      esac
+      case "$ftype" in *script*) ;; *) echo "$c"; exit 0 ;; esac
     done
-    if [ -z "$FOUND" ]; then
-      FOUND=$(which ${claudePathInput} 2>/dev/null)
-    fi
-    if [ -z "$FOUND" ]; then
-      echo "NOT_FOUND"
-    else
-      echo "$FOUND"
-    fi
-  `;
-  const resolveResult = await sshExec(ssh, resolveScript);
-  console.log(`[relay-deploy] claude resolve raw output: ${JSON.stringify(resolveResult)}`);
+    which ${claudePathInput} 2>/dev/null || echo "NOT_FOUND"
+  `);
   const claudePath = resolveResult.trim().split('\n').pop()?.trim() || '';
   if (claudePath === 'NOT_FOUND' || claudePath === '') {
-    throw new Error(`Claude CLI not found on remote at "${claudePathInput}". Raw output: ${resolveResult.slice(0, 500)}`);
+    throw new Error(`Claude CLI not found on remote at "${claudePathInput}".`);
   }
   console.log(`[relay-deploy] Remote claude path: ${claudePath}`);
 
-  // Derive node path from claude's directory so they use the same nvm version.
-  const claudeDir = claudePath.substring(0, claudePath.lastIndexOf('/'));
-  const siblingNode = `${claudeDir}/node`;
-  console.log(`[relay-deploy] Checking sibling node: ${siblingNode}`);
-  const nodeCheck = await sshExec(ssh, `test -x ${siblingNode} && echo "${siblingNode}" || (${sourceProfile} which node 2>/dev/null || echo "NOT_FOUND")`);
-  console.log(`[relay-deploy] node check raw output: ${JSON.stringify(nodeCheck)}`);
-  const nodePath = nodeCheck.trim().split('\n').pop()?.trim() || '';
+  // Find node: search nvm bin dirs explicitly
+  const nodeResolve = await sshExec(ssh, `
+    ${sourceProfile}
+    NODE=$(which node 2>/dev/null)
+    if [ -n "$NODE" ]; then echo "$NODE"; exit 0; fi
+    for d in $HOME/.nvm/versions/node/*/bin; do
+      [ -x "$d/node" ] && echo "$d/node" && exit 0
+    done
+    echo "NOT_FOUND"
+  `);
+  const nodePath = nodeResolve.trim().split('\n').pop()?.trim() || '';
   if (nodePath === 'NOT_FOUND' || nodePath === '') {
-    throw new Error(`Node.js not found on remote. claudePath=${claudePath}, siblingNode=${siblingNode}, nodeCheck raw=${nodeCheck.slice(0, 500)}`);
+    throw new Error('Node.js not found on remote. Make sure node is installed.');
   }
   console.log(`[relay-deploy] Remote node path: ${nodePath}`);
 
-  // Check proxy env vars are set on remote
-  const proxyCheck = await sshExec(ssh, `${sourceProfile} echo "http=\${http_proxy:-\${HTTP_PROXY:-}}" "https=\${https_proxy:-\${HTTPS_PROXY:-}}"`);
-  const proxyParts = proxyCheck.trim();
-  const hasHttpProxy = !proxyParts.includes('http= ') && !proxyParts.startsWith('http= ');
-  const hasHttpsProxy = !proxyParts.endsWith('https=');
-  if (!hasHttpProxy && !hasHttpsProxy) {
-    throw new Error(
-      'Proxy not configured on remote server. Please set http_proxy and https_proxy in ~/.bashrc on the remote machine, then reconnect.'
-    );
-  }
-  console.log(`[relay-deploy] Remote proxy: ${proxyParts}`);
+  const nvmBinDir = nodePath.substring(0, nodePath.lastIndexOf('/'));
 
-  // Start relay with full env (PATH, proxy, nvm, etc.)
-  // Use sourceProfile + bash -l to cover all profile/bashrc patterns
+  // Build env vars string from connection config for the relay process
+  let envVars: Record<string, string> = {};
+  try { envVars = JSON.parse(conn.env_vars || '{}'); } catch { /* ignore */ }
+  const envExports = Object.entries(envVars)
+    .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
+    .join(' ');
+  console.log(`[relay-deploy] Env vars: ${envExports || '(none)'}`);
+
+  // Start relay with nvm PATH + connection env vars
   const startResult = await sshExec(ssh,
-    `${sourceProfile} cd ${RELAY_DIR} && CLAUDE_BINARY="${claudePath}" nohup ${nodePath} ${RELAY_SCRIPT} > relay.log 2>&1 & sleep 1 && cat relay.port 2>/dev/null || echo "FAILED"`
+    `${sourceProfile} cd ${RELAY_DIR} && PATH="${nvmBinDir}:$PATH" ${envExports} CLAUDE_BINARY="${claudePath}" nohup ${nodePath} ${RELAY_SCRIPT} > relay.log 2>&1 & sleep 1 && cat relay.port 2>/dev/null || echo "FAILED"`
   );
 
   const port = parseInt(startResult.trim(), 10);

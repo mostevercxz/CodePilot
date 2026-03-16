@@ -1077,6 +1077,8 @@ const zh: Record<TranslationKey, string> = {
   'remote.form.claudePathPlaceholder': '留空自动检测',
   'remote.form.defaultDir': '默认工作目录（远程）',
   'remote.form.defaultDirPlaceholder': '~/projects',
+  'remote.form.envVars': '环境变量',
+  'remote.form.addEnvVar': '添加',
   'remote.form.cancel': '取消',
   'remote.form.create': '创建',
   'remote.form.update': '更新',

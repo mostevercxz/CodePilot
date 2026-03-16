@@ -1080,6 +1080,8 @@ const en = {
   'remote.form.claudePathPlaceholder': 'Leave empty for auto-detect',
   'remote.form.defaultDir': 'Default Working Directory (on remote)',
   'remote.form.defaultDirPlaceholder': '~/projects',
+  'remote.form.envVars': 'Environment Variables',
+  'remote.form.addEnvVar': 'Add',
   'remote.form.cancel': 'Cancel',
   'remote.form.create': 'Create',
   'remote.form.update': 'Update',

@@ -43,6 +43,7 @@ export interface RemoteConnection {
   password_encrypted: string;
   claude_binary_path: string;
   default_working_directory: string;
+  env_vars: string; // JSON string of Record<string, string>
   created_at: string;
   updated_at: string;
   last_connected_at: string;
