@@ -82,10 +82,10 @@ export async function deployRelay(ssh: Client, conn: RemoteConnection): Promise<
   }
   console.log(`[relay-deploy] Remote proxy: ${proxyParts}`);
 
-  // Start relay with full profile sourced (for PATH, proxy env vars, etc.)
-  // Use full paths for both node and claude to avoid PATH issues
+  // Start relay in a login shell so it inherits full env (PATH, proxy, nvm, etc.)
+  // The relay process itself needs PATH to resolve commands called by claude
   const startResult = await sshExec(ssh,
-    `${sourceProfile} cd ${RELAY_DIR} && CLAUDE_BINARY="${claudePath}" nohup ${nodePath} ${RELAY_SCRIPT} > relay.log 2>&1 & sleep 1 && cat relay.port 2>/dev/null || echo "FAILED"`
+    `bash -l -c 'cd ${RELAY_DIR} && CLAUDE_BINARY="${claudePath}" nohup ${nodePath} ${RELAY_SCRIPT} > relay.log 2>&1 & sleep 1 && cat relay.port 2>/dev/null || echo "FAILED"'`
   );
 
   const port = parseInt(startResult.trim(), 10);
