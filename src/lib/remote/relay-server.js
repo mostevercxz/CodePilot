@@ -15,6 +15,13 @@ const crypto = require('crypto');
 
 const RELAY_VERSION = '1.0.0';
 const CLAUDE_BINARY = process.env.CLAUDE_BINARY || 'claude';
+const RELAY_LOG = path.join(__dirname, 'relay-debug.log');
+
+function relayLog(msg) {
+  const line = `[${new Date().toISOString()}] ${msg}\n`;
+  try { fs.appendFileSync(RELAY_LOG, line); } catch { /* ignore */ }
+  console.log(msg);
+}
 
 // Active sessions: sessionId → { process, abortController }
 const activeSessions = new Map();
@@ -119,6 +126,11 @@ async function handleChatMessages(req, res) {
 
   const cwd = workingDirectory || process.env.HOME || '/tmp';
 
+  relayLog(`=== CHAT: sessionId=${sessionId} cwd=${cwd}`);
+  relayLog(`  CLAUDE_BINARY=${CLAUDE_BINARY}`);
+  relayLog(`  args=${JSON.stringify(args)}`);
+  relayLog(`  PATH=${process.env.PATH}`);
+
   // Spawn claude CLI process
   const proc = spawn(CLAUDE_BINARY, args, {
     cwd,
@@ -185,6 +197,7 @@ async function handleChatMessages(req, res) {
   });
 
   proc.on('close', (code) => {
+    relayLog(`  Process closed with code ${code}`);
     activeSessions.delete(sessionId);
     if (code !== 0 && !abortController.aborted) {
       sendSSE(res, 'error', `Process exited with code ${code}`);
@@ -194,6 +207,7 @@ async function handleChatMessages(req, res) {
   });
 
   proc.on('error', (err) => {
+    relayLog(`  Process error: ${err.message}`);
     activeSessions.delete(sessionId);
     sendSSE(res, 'error', err.message);
     sendSSE(res, 'done', '');
@@ -482,7 +496,9 @@ async function main() {
     // Write port file so the deployer can read it
     const portFile = path.join(__dirname, 'relay.port');
     fs.writeFileSync(portFile, String(port));
-    console.log(`[codepilot-relay] v${RELAY_VERSION} listening on 127.0.0.1:${port}`);
+    relayLog(`v${RELAY_VERSION} listening on 127.0.0.1:${port}`);
+    relayLog(`CLAUDE_BINARY=${CLAUDE_BINARY}`);
+    relayLog(`PATH=${process.env.PATH}`);
   });
 
   // Graceful shutdown

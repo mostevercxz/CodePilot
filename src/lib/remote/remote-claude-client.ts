@@ -1,5 +1,19 @@
 import { sshManager } from './ssh-manager';
 import { invalidateTree } from './remote-cache';
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
+
+function getLogPath() {
+  const dir = path.join(os.homedir(), '.codepilot');
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  return path.join(dir, 'remote-chat.log');
+}
+
+function log(msg: string) {
+  const line = `[${new Date().toISOString()}] ${msg}\n`;
+  try { fs.appendFileSync(getLogPath(), line); } catch { /* ignore */ }
+}
 
 interface RemoteStreamOptions {
   prompt: string;
@@ -23,7 +37,10 @@ export function streamClaudeRemote(options: RemoteStreamOptions): ReadableStream
   return new ReadableStream<string>({
     async start(controller) {
       const tunnelPort = sshManager.getTunnelPort(connectionId);
+      log(`streamClaudeRemote: tunnelPort=${tunnelPort} connectionId=${connectionId}`);
+      log(`  prompt=${options.prompt.slice(0, 200)} workDir=${options.workingDirectory}`);
       if (!tunnelPort) {
+        log('ERROR: No tunnel port — not connected');
         controller.enqueue(`data: ${JSON.stringify({ type: 'error', data: 'Not connected to remote server' })}\n\n`);
         controller.enqueue(`data: ${JSON.stringify({ type: 'done', data: '' })}\n\n`);
         controller.close();
@@ -31,6 +48,7 @@ export function streamClaudeRemote(options: RemoteStreamOptions): ReadableStream
       }
 
       const relayUrl = `http://127.0.0.1:${tunnelPort}/chat/messages`;
+      log(`POST ${relayUrl}`);
 
       try {
         const response = await fetch(relayUrl, {
@@ -48,8 +66,11 @@ export function streamClaudeRemote(options: RemoteStreamOptions): ReadableStream
           signal: abortController?.signal,
         });
 
+        log(`Response status: ${response.status}`);
+
         if (!response.ok) {
           const errorText = await response.text();
+          log(`ERROR: Relay returned ${response.status}: ${errorText}`);
           controller.enqueue(`data: ${JSON.stringify({ type: 'error', data: `Remote relay error: ${errorText}` })}\n\n`);
           controller.enqueue(`data: ${JSON.stringify({ type: 'done', data: '' })}\n\n`);
           controller.close();
@@ -58,20 +79,25 @@ export function streamClaudeRemote(options: RemoteStreamOptions): ReadableStream
 
         const reader = response.body?.getReader();
         if (!reader) {
+          log('ERROR: No response body from relay');
           controller.enqueue(`data: ${JSON.stringify({ type: 'error', data: 'No response body from relay' })}\n\n`);
           controller.close();
           return;
         }
 
         const decoder = new TextDecoder();
+        let totalChunks = 0;
 
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
 
           const chunk = decoder.decode(value, { stream: true });
+          totalChunks++;
+          if (totalChunks <= 3) log(`Chunk #${totalChunks}: ${chunk.slice(0, 200)}`);
           controller.enqueue(chunk);
         }
+        log(`Stream complete. Total chunks: ${totalChunks}`);
 
         // After stream completes, invalidate file tree cache (Claude may have written files)
         if (options.workingDirectory) {
