@@ -3,7 +3,7 @@ import type { RemoteConnection } from '@/types';
 import fs from 'fs';
 import path from 'path';
 
-export const RELAY_VERSION = '1.3.0';
+export const RELAY_VERSION = '1.4.0';
 const RELAY_DIR = '~/.codepilot-relay';
 const RELAY_SCRIPT = 'relay.js';
 

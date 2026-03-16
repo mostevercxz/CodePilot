@@ -13,7 +13,7 @@ const path = require('path');
 const { execSync, spawn } = require('child_process');
 const crypto = require('crypto');
 
-const RELAY_VERSION = '1.3.0';
+const RELAY_VERSION = '1.4.0';
 const CLAUDE_BINARY = process.env.CLAUDE_BINARY || 'claude';
 const RELAY_LOG = path.join(__dirname, 'relay-debug.log');
 
@@ -114,8 +114,8 @@ async function handleChatMessages(req, res) {
 
   const abortController = { aborted: false };
 
-  // Build claude CLI arguments
-  const args = ['--output-format', 'stream-json', '--verbose'];
+  // Build claude CLI arguments — use json output format (stream-json has issues with stdio)
+  const args = ['--output-format', 'json', '--print'];
 
   if (model) args.push('--model', model);
   if (sdkSessionId) args.push('--resume', sdkSessionId);
@@ -129,7 +129,6 @@ async function handleChatMessages(req, res) {
   relayLog(`=== CHAT: sessionId=${sessionId} cwd=${cwd}`);
   relayLog(`  CLAUDE_BINARY=${CLAUDE_BINARY}`);
   relayLog(`  args=${JSON.stringify(args)}`);
-  relayLog(`  PATH=${process.env.PATH}`);
 
   // Spawn claude CLI process
   const proc = spawn(CLAUDE_BINARY, args, {
@@ -140,68 +139,59 @@ async function handleChatMessages(req, res) {
 
   activeSessions.set(sessionId, { process: proc, abortController });
 
-  let buffer = '';
+  // Collect full stdout (json format returns a single JSON object)
+  let stdout = '';
+  let stderr = '';
 
   proc.stdout.on('data', (chunk) => {
-    buffer += chunk.toString();
-    // Process complete lines
-    const lines = buffer.split('\n');
-    buffer = lines.pop() || ''; // Keep incomplete line in buffer
-
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      try {
-        const event = JSON.parse(line);
-        // Map claude CLI events to SSE format
-        if (event.type === 'assistant' && event.message) {
-          // Process content blocks
-          for (const block of (event.message.content || [])) {
-            if (block.type === 'text') {
-              sendSSE(res, 'text', block.text);
-            } else if (block.type === 'tool_use') {
-              sendSSE(res, 'tool_use', { id: block.id, name: block.name, input: block.input });
-            } else if (block.type === 'tool_result') {
-              sendSSE(res, 'tool_result', { tool_use_id: block.tool_use_id, content: block.content, is_error: block.is_error });
-            }
-          }
-          // Send usage info
-          if (event.message.usage) {
-            sendSSE(res, 'result', { usage: event.message.usage, session_id: event.session_id });
-          }
-        } else if (event.type === 'content_block_delta') {
-          if (event.delta?.type === 'text_delta') {
-            sendSSE(res, 'text', event.delta.text);
-          }
-        } else if (event.type === 'result') {
-          sendSSE(res, 'result', {
-            usage: event.usage,
-            session_id: event.session_id,
-            is_error: event.is_error,
-          });
-        } else if (event.type === 'error') {
-          sendSSE(res, 'error', event.error?.message || 'Unknown error');
-        } else if (event.type === 'system' && event.session_id) {
-          sendSSE(res, 'status', { session_id: event.session_id, model: event.model });
-        }
-      } catch {
-        // Not JSON or malformed — skip
-      }
-    }
+    stdout += chunk.toString();
   });
 
   proc.stderr.on('data', (chunk) => {
-    const text = chunk.toString();
-    if (text.trim()) {
-      sendSSE(res, 'tool_output', text);
-    }
+    stderr += chunk.toString();
   });
 
   proc.on('close', (code) => {
-    relayLog(`  Process closed with code ${code}`);
+    relayLog(`  Process closed with code ${code}, stdout length=${stdout.length}`);
     activeSessions.delete(sessionId);
+
     if (code !== 0 && !abortController.aborted) {
-      sendSSE(res, 'error', `Process exited with code ${code}`);
+      relayLog(`  STDERR: ${stderr.slice(0, 500)}`);
+      sendSSE(res, 'error', `Process exited with code ${code}. ${stderr.slice(0, 200)}`);
+      sendSSE(res, 'done', '');
+      res.end();
+      return;
     }
+
+    // Parse the JSON result
+    try {
+      const result = JSON.parse(stdout.trim());
+      relayLog(`  Result type=${result.type}, session_id=${result.session_id}`);
+
+      // Send session_id as status event
+      if (result.session_id) {
+        sendSSE(res, 'status', { session_id: result.session_id, model: result.model });
+      }
+
+      // Send the text content
+      if (result.result) {
+        sendSSE(res, 'text', result.result);
+      }
+
+      // Send usage/result event
+      sendSSE(res, 'result', {
+        usage: result.usage,
+        session_id: result.session_id,
+        is_error: result.is_error,
+      });
+    } catch (e) {
+      relayLog(`  Failed to parse stdout: ${e.message}. Raw: ${stdout.slice(0, 300)}`);
+      // Try to send raw stdout as text if it's not JSON
+      if (stdout.trim()) {
+        sendSSE(res, 'text', stdout.trim());
+      }
+    }
+
     sendSSE(res, 'done', '');
     res.end();
   });
