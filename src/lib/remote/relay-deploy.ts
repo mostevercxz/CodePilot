@@ -3,7 +3,7 @@ import type { RemoteConnection } from '@/types';
 import fs from 'fs';
 import path from 'path';
 
-export const RELAY_VERSION = '1.1.0';
+export const RELAY_VERSION = '1.2.0';
 const RELAY_DIR = '~/.codepilot-relay';
 const RELAY_SCRIPT = 'relay.js';
 
@@ -60,32 +60,40 @@ export async function deployRelay(ssh: Client, conn: RemoteConnection): Promise<
     'eval "$(grep -E "^export\\s+" ~/.bashrc 2>/dev/null)" 2>/dev/null',
   ].join('; ') + ';';
 
-  // Verify Claude CLI is accessible and resolve to the real binary.
-  // Skip shell wrapper scripts — find the actual Node.js binary/symlink.
+  // Resolve claude to the real binary, skipping shell wrappers.
+  // Run as a single script to preserve sourced env.
   const claudePathInput = conn.claude_binary_path || 'claude';
-  const resolveResult = await sshExec(ssh, `${sourceProfile} bash -c '
+  const resolveScript = `
+    ${sourceProfile}
+    FOUND=""
     for c in $(which -a ${claudePathInput} 2>/dev/null); do
       ftype=$(file -b "$c" 2>/dev/null)
       case "$ftype" in
-        *script*) continue ;;  # skip shell wrappers
-        *) echo "$c"; exit 0 ;;
+        *script*) ;;
+        *) FOUND="$c"; break ;;
       esac
     done
-    # fallback: first match
-    which ${claudePathInput} 2>/dev/null || echo "NOT_FOUND"
-  '`);
-  const claudePath = resolveResult.trim();
+    if [ -z "$FOUND" ]; then
+      FOUND=$(which ${claudePathInput} 2>/dev/null)
+    fi
+    if [ -z "$FOUND" ]; then
+      echo "NOT_FOUND"
+    else
+      echo "$FOUND"
+    fi
+  `;
+  const resolveResult = await sshExec(ssh, resolveScript);
+  const claudePath = resolveResult.trim().split('\n').pop()?.trim() || '';
   if (claudePath === 'NOT_FOUND' || claudePath === '') {
     throw new Error(`Claude CLI not found on remote at "${claudePathInput}". Please install Claude Code CLI or specify the correct path.`);
   }
   console.log(`[relay-deploy] Remote claude path: ${claudePath}`);
 
   // Derive node path from claude's directory so they use the same nvm version.
-  // e.g. claude at /home/user/.nvm/versions/node/v22/bin/claude → node at .../bin/node
   const claudeDir = claudePath.substring(0, claudePath.lastIndexOf('/'));
   const siblingNode = `${claudeDir}/node`;
   const nodeCheck = await sshExec(ssh, `test -x ${siblingNode} && echo "${siblingNode}" || (${sourceProfile} which node 2>/dev/null || echo "NOT_FOUND")`);
-  const nodePath = nodeCheck.trim();
+  const nodePath = nodeCheck.trim().split('\n').pop()?.trim() || '';
   if (nodePath === 'NOT_FOUND' || nodePath === '') {
     throw new Error('Node.js not found on remote. Make sure node is installed and in PATH.');
   }

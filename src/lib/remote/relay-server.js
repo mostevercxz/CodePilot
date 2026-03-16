@@ -13,7 +13,7 @@ const path = require('path');
 const { execSync, spawn } = require('child_process');
 const crypto = require('crypto');
 
-const RELAY_VERSION = '1.1.0';
+const RELAY_VERSION = '1.2.0';
 const CLAUDE_BINARY = process.env.CLAUDE_BINARY || 'claude';
 const RELAY_LOG = path.join(__dirname, 'relay-debug.log');
 
