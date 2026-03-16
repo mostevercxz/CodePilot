@@ -48,7 +48,7 @@ export async function deployRelay(ssh: Client, conn: RemoteConnection): Promise<
   await uploadFile(ssh, `${RELAY_DIR}/${RELAY_SCRIPT}`, relayContent);
 
   // Kill any existing relay process
-  await sshExec(ssh, `pkill -f "node.*codepilot-relay" 2>/dev/null || true`);
+  await sshExec(ssh, `pkill -f "node.*relay\\.js" 2>/dev/null; pkill -f "node.*codepilot-relay" 2>/dev/null; sleep 0.5; rm -f ${RELAY_DIR}/relay.port; true`);
 
   // Source user profile to get PATH (nvm, etc.) for non-interactive SSH sessions.
   // Many .bashrc files have an early `return` for non-interactive shells,
