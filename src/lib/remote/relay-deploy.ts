@@ -22,20 +22,28 @@ export async function deployRelay(ssh: Client, conn: RemoteConnection): Promise<
   await sshExec(ssh, `mkdir -p ${RELAY_DIR}`);
 
   // Upload relay script via SFTP
-  const relaySource = path.join(__dirname, 'relay-server.js');
-  let relayContent: string;
-
-  if (fs.existsSync(relaySource)) {
-    relayContent = fs.readFileSync(relaySource, 'utf-8');
-  } else {
-    // In development, the file might be at a different location
-    const devSource = path.resolve(__dirname, '..', '..', '..', 'src', 'lib', 'remote', 'relay-server.js');
-    if (fs.existsSync(devSource)) {
-      relayContent = fs.readFileSync(devSource, 'utf-8');
-    } else {
-      throw new Error('Relay script not found. Expected at: ' + relaySource);
-    }
+  // Try multiple locations: process.cwd() is project root in both dev and production
+  const candidates = [
+    path.join(process.cwd(), 'src', 'lib', 'remote', 'relay-server.js'),       // dev mode
+    path.join(process.cwd(), 'resources', 'standalone', 'relay-server.js'),     // packaged electron
+    path.join(__dirname, 'relay-server.js'),                                     // co-located (production build)
+    path.resolve(__dirname, '..', '..', '..', 'src', 'lib', 'remote', 'relay-server.js'),
+  ];
+  let relayContent: string | undefined;
+  let foundAt = '';
+  for (const candidate of candidates) {
+    try {
+      if (fs.existsSync(candidate)) {
+        relayContent = fs.readFileSync(candidate, 'utf-8');
+        foundAt = candidate;
+        break;
+      }
+    } catch { /* skip */ }
   }
+  if (!relayContent) {
+    throw new Error('Relay script not found. Searched:\n' + candidates.join('\n'));
+  }
+  console.log(`[relay-deploy] Found relay script at: ${foundAt}`);
 
   await uploadFile(ssh, `${RELAY_DIR}/${RELAY_SCRIPT}`, relayContent);
 
