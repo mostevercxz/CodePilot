@@ -27,6 +27,7 @@ interface SessionListItemProps {
   onMouseLeave: () => void;
   onDelete: (e: React.MouseEvent, sessionId: string) => void;
   onAddToSplit: (session: ChatSession) => void;
+  onClick?: (e: React.MouseEvent) => void;
 }
 
 export function SessionListItem({
@@ -43,6 +44,7 @@ export function SessionListItem({
   onMouseLeave,
   onDelete,
   onAddToSplit,
+  onClick,
 }: SessionListItemProps) {
   return (
     <div
@@ -51,7 +53,8 @@ export function SessionListItem({
       onMouseLeave={onMouseLeave}
     >
       <Link
-        href={`/chat/${session.id}`}
+        href={onClick ? '#' : `/chat/${session.id}`}
+        onClick={onClick}
         className={cn(
           "flex items-center gap-1.5 rounded-md pl-2 pr-2 py-1.5 transition-all duration-150 min-w-0",
           isActive

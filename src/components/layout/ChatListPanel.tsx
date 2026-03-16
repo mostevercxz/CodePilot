@@ -191,6 +191,9 @@ export function ChatListPanel({ open, width }: ChatListPanelProps) {
   const abortRef = useRef<AbortController | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Track remote CLI sessions that haven't been opened yet (virtual sessions)
+  const [remoteCliSessions, setRemoteCliSessions] = useState<ChatSession[]>([]);
+
   const fetchSessions = useCallback(async () => {
     // Cancel any in-flight request
     abortRef.current?.abort();
@@ -200,7 +203,54 @@ export function ChatListPanel({ open, width }: ChatListPanelProps) {
       const res = await fetch("/api/chat/sessions", { signal: controller.signal });
       if (res.ok) {
         const data = await res.json();
-        setSessions(data.sessions || []);
+        const localSessions: ChatSession[] = data.sessions || [];
+        setSessions(localSessions);
+
+        // Fetch remote CLI sessions for active connections
+        const openedSdkIds = new Set(localSessions.map((s: ChatSession) => s.sdk_session_id).filter(Boolean));
+        try {
+          const connRes = await fetch("/api/remote", { signal: controller.signal });
+          if (connRes.ok) {
+            const connData = await connRes.json();
+            const allRemote: ChatSession[] = [];
+            for (const conn of connData.connections || []) {
+              try {
+                const statusRes = await fetch(`/api/remote/${conn.id}/status`, { signal: controller.signal });
+                const statusData = await statusRes.json();
+                if (statusData.runtime?.status !== 'connected') continue;
+                const cliRes = await fetch(`/api/claude-sessions?connection_id=${conn.id}`, { signal: controller.signal });
+                if (cliRes.ok) {
+                  const cliData = await cliRes.json();
+                  for (const s of cliData.sessions || []) {
+                    // Skip sessions already opened locally
+                    if (openedSdkIds.has(s.sessionId)) continue;
+                    // Create a virtual ChatSession for display
+                    allRemote.push({
+                      id: `remote:${conn.id}:${s.sessionId}`,
+                      title: s.preview || s.projectName,
+                      created_at: s.createdAt,
+                      updated_at: s.updatedAt,
+                      model: '',
+                      system_prompt: '',
+                      working_directory: s.cwd || s.projectPath,
+                      sdk_session_id: s.sessionId,
+                      project_name: s.projectName,
+                      status: 'active',
+                      provider_name: conn.name,
+                      provider_id: '',
+                      sdk_cwd: s.cwd || s.projectPath,
+                      runtime_status: 'idle',
+                      runtime_updated_at: '',
+                      runtime_error: '',
+                      connection_id: conn.id,
+                    });
+                  }
+                }
+              } catch { /* skip this connection */ }
+            }
+            setRemoteCliSessions(allRemote);
+          }
+        } catch { /* ignore remote fetch errors */ }
       }
     } catch (e) {
       // Ignore abort errors; log others
@@ -272,6 +322,29 @@ export function ChatListPanel({ open, width }: ChatListPanelProps) {
     }
   };
 
+  // Open a virtual remote CLI session: import it into local DB then navigate
+  const handleOpenRemoteCliSession = useCallback(async (e: React.MouseEvent, session: ChatSession) => {
+    e.preventDefault();
+    const parts = session.id.split(':'); // remote:{connectionId}:{sdkSessionId}
+    if (parts.length < 3) return;
+    const connectionId = parts[1];
+    const sdkSessionId = parts.slice(2).join(':');
+    try {
+      const res = await fetch("/api/claude-sessions/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId: sdkSessionId, connection_id: connectionId }),
+      });
+      const data = await res.json();
+      if (res.status === 409 && data.existingSessionId) {
+        router.push(`/chat/${data.existingSessionId}`);
+      } else if (res.ok && data.session) {
+        router.push(`/chat/${data.session.id}`);
+        window.dispatchEvent(new CustomEvent("session-created"));
+      }
+    } catch { /* ignore */ }
+  }, [router]);
+
   const handleCreateSessionInProject = async (
     e: React.MouseEvent,
     workingDirectory: string
@@ -302,7 +375,8 @@ export function ChatListPanel({ open, width }: ChatListPanelProps) {
   );
 
   const filteredSessions = useMemo(() => {
-    let result = sessions;
+    // Merge local sessions with remote CLI sessions
+    let result = [...sessions, ...remoteCliSessions];
     if (searchQuery) {
       result = result.filter(
         (s) =>
@@ -316,7 +390,7 @@ export function ChatListPanel({ open, width }: ChatListPanelProps) {
       result = result.filter((s) => !splitSessionIds.has(s.id));
     }
     return result;
-  }, [sessions, searchQuery, isSplitActive, splitSessionIds]);
+  }, [sessions, remoteCliSessions, searchQuery, isSplitActive, splitSessionIds]);
 
   const projectGroups = useMemo(
     () => groupSessionsByProject(filteredSessions),
@@ -484,6 +558,7 @@ export function ChatListPanel({ open, width }: ChatListPanelProps) {
                               projectName: s.project_name || "",
                               mode: s.mode,
                             })}
+                            onClick={session.id.startsWith('remote:') ? (e) => handleOpenRemoteCliSession(e, session) : undefined}
                           />
                         );
                       })}
