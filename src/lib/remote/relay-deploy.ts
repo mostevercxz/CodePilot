@@ -60,22 +60,36 @@ export async function deployRelay(ssh: Client, conn: RemoteConnection): Promise<
     'eval "$(grep -E "^export\\s+" ~/.bashrc 2>/dev/null)" 2>/dev/null',
   ].join('; ') + ';';
 
-  // Verify node is accessible
-  const nodeCheck = await sshExec(ssh, `${sourceProfile} which node 2>/dev/null || echo "NOT_FOUND"`);
-  if (nodeCheck.trim() === 'NOT_FOUND' || nodeCheck.trim() === '') {
-    throw new Error('Node.js not found on remote. Make sure node is installed and in PATH.');
-  }
-  const nodePath = nodeCheck.trim();
-  console.log(`[relay-deploy] Remote node path: ${nodePath}`);
-
-  // Verify Claude CLI is accessible and resolve full path
+  // Verify Claude CLI is accessible and resolve to the real binary.
+  // Skip shell wrapper scripts — find the actual Node.js binary/symlink.
   const claudePathInput = conn.claude_binary_path || 'claude';
-  const whichResult = await sshExec(ssh, `${sourceProfile} which ${claudePathInput} 2>/dev/null || echo "NOT_FOUND"`);
-  if (whichResult.trim() === 'NOT_FOUND' || whichResult.trim() === '') {
+  const resolveResult = await sshExec(ssh, `${sourceProfile} bash -c '
+    for c in $(which -a ${claudePathInput} 2>/dev/null); do
+      ftype=$(file -b "$c" 2>/dev/null)
+      case "$ftype" in
+        *script*) continue ;;  # skip shell wrappers
+        *) echo "$c"; exit 0 ;;
+      esac
+    done
+    # fallback: first match
+    which ${claudePathInput} 2>/dev/null || echo "NOT_FOUND"
+  '`);
+  const claudePath = resolveResult.trim();
+  if (claudePath === 'NOT_FOUND' || claudePath === '') {
     throw new Error(`Claude CLI not found on remote at "${claudePathInput}". Please install Claude Code CLI or specify the correct path.`);
   }
-  const claudePath = whichResult.trim();
   console.log(`[relay-deploy] Remote claude path: ${claudePath}`);
+
+  // Derive node path from claude's directory so they use the same nvm version.
+  // e.g. claude at /home/user/.nvm/versions/node/v22/bin/claude → node at .../bin/node
+  const claudeDir = claudePath.substring(0, claudePath.lastIndexOf('/'));
+  const siblingNode = `${claudeDir}/node`;
+  const nodeCheck = await sshExec(ssh, `test -x ${siblingNode} && echo "${siblingNode}" || (${sourceProfile} which node 2>/dev/null || echo "NOT_FOUND")`);
+  const nodePath = nodeCheck.trim();
+  if (nodePath === 'NOT_FOUND' || nodePath === '') {
+    throw new Error('Node.js not found on remote. Make sure node is installed and in PATH.');
+  }
+  console.log(`[relay-deploy] Remote node path: ${nodePath}`);
 
   // Check proxy env vars are set on remote
   const proxyCheck = await sshExec(ssh, `${sourceProfile} echo "http=\${http_proxy:-\${HTTP_PROXY:-}}" "https=\${https_proxy:-\${HTTPS_PROXY:-}}"`);
