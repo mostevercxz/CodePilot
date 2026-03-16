@@ -61,12 +61,20 @@ export async function deployRelay(ssh: Client, conn: RemoteConnection): Promise<
   ].join('; ') + ';';
 
   // Resolve claude to the real binary, skipping shell wrappers.
-  // Run as a single script to preserve sourced env.
+  // Also search nvm bin directories explicitly since nvm.sh may not
+  // activate properly in non-interactive SSH.
   const claudePathInput = conn.claude_binary_path || 'claude';
   const resolveScript = `
     ${sourceProfile}
+    # Build candidate list: PATH matches + nvm bin dirs
+    CANDIDATES=$(which -a ${claudePathInput} 2>/dev/null)
+    for d in $HOME/.nvm/versions/node/*/bin; do
+      if [ -x "$d/${claudePathInput}" ]; then
+        CANDIDATES="$CANDIDATES $d/${claudePathInput}"
+      fi
+    done
     FOUND=""
-    for c in $(which -a ${claudePathInput} 2>/dev/null); do
+    for c in $CANDIDATES; do
       ftype=$(file -b "$c" 2>/dev/null)
       case "$ftype" in
         *script*) ;;
