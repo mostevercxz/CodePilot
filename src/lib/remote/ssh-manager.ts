@@ -190,26 +190,43 @@ class SSHManager {
   }
 
   private buildSSHConfig(conn: RemoteConnection): ConnectConfig {
+    // SSH debug log file
+    const logPath = path.join(os.homedir(), '.codepilot', 'ssh-debug.log');
+    const logStream = fs.createWriteStream(logPath, { flags: 'a' });
+    const timestamp = () => new Date().toISOString();
+    logStream.write(`\n${'='.repeat(60)}\n[${timestamp()}] SSH connect to ${conn.username}@${conn.host}:${conn.port} auth=${conn.auth_method}\n`);
+
     const config: ConnectConfig = {
       host: conn.host,
       port: conn.port,
       username: conn.username,
       readyTimeout: 30000,
       keepaliveInterval: 10000,
+      debug: (msg: string) => {
+        logStream.write(`[${timestamp()}] ${msg}\n`);
+      },
     };
 
     if (conn.auth_method === 'key') {
       const keyPath = conn.private_key_path || path.join(os.homedir(), '.ssh', 'id_rsa');
+      logStream.write(`[${timestamp()}] Key path: ${keyPath}, exists: ${fs.existsSync(keyPath)}\n`);
       if (fs.existsSync(keyPath)) {
         config.privateKey = fs.readFileSync(keyPath);
+        logStream.write(`[${timestamp()}] Key loaded, ${config.privateKey.length} bytes\n`);
+      } else {
+        logStream.write(`[${timestamp()}] WARNING: Key file not found!\n`);
       }
     } else if (conn.auth_method === 'password') {
       // Password is stored encrypted; decrypt it
       if (conn.password_encrypted) {
         config.password = decryptPassword(conn.password_encrypted);
+        logStream.write(`[${timestamp()}] Password decrypted, length: ${config.password?.length}\n`);
+      } else {
+        logStream.write(`[${timestamp()}] WARNING: No encrypted password stored!\n`);
       }
     } else if (conn.auth_method === 'agent') {
       config.agent = process.env.SSH_AUTH_SOCK;
+      logStream.write(`[${timestamp()}] SSH_AUTH_SOCK: ${process.env.SSH_AUTH_SOCK || 'NOT SET'}\n`);
     }
 
     return config;
