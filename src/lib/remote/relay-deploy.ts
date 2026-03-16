@@ -50,16 +50,27 @@ export async function deployRelay(ssh: Client, conn: RemoteConnection): Promise<
   // Kill any existing relay process
   await sshExec(ssh, `pkill -f "node.*codepilot-relay" 2>/dev/null || true`);
 
+  // Source user profile to get PATH (nvm, etc.) for non-interactive SSH sessions
+  const sourceProfile = 'source ~/.bashrc 2>/dev/null; source ~/.profile 2>/dev/null; source ~/.nvm/nvm.sh 2>/dev/null;';
+
+  // Verify node is accessible
+  const nodeCheck = await sshExec(ssh, `${sourceProfile} which node 2>/dev/null || echo "NOT_FOUND"`);
+  if (nodeCheck.trim() === 'NOT_FOUND' || nodeCheck.trim() === '') {
+    throw new Error('Node.js not found on remote. Make sure node is installed and in PATH.');
+  }
+  const nodePath = nodeCheck.trim();
+  console.log(`[relay-deploy] Remote node path: ${nodePath}`);
+
   // Verify Claude CLI is accessible
   const claudePath = conn.claude_binary_path || 'claude';
-  const whichResult = await sshExec(ssh, `which ${claudePath} 2>/dev/null || echo "NOT_FOUND"`);
-  if (whichResult.trim() === 'NOT_FOUND') {
+  const whichResult = await sshExec(ssh, `${sourceProfile} which ${claudePath} 2>/dev/null || echo "NOT_FOUND"`);
+  if (whichResult.trim() === 'NOT_FOUND' || whichResult.trim() === '') {
     throw new Error(`Claude CLI not found on remote at "${claudePath}". Please install Claude Code CLI or specify the correct path.`);
   }
 
-  // Start relay on a random available port
+  // Start relay on a random available port (use full node path to avoid PATH issues)
   const startResult = await sshExec(ssh,
-    `cd ${RELAY_DIR} && CLAUDE_BINARY="${claudePath}" nohup node ${RELAY_SCRIPT} > relay.log 2>&1 & sleep 1 && cat relay.port 2>/dev/null || echo "FAILED"`
+    `cd ${RELAY_DIR} && CLAUDE_BINARY="${claudePath}" nohup ${nodePath} ${RELAY_SCRIPT} > relay.log 2>&1 & sleep 1 && cat relay.port 2>/dev/null || echo "FAILED"`
   );
 
   const port = parseInt(startResult.trim(), 10);
