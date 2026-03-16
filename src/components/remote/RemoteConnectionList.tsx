@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, ChatCircle, Clock, FolderOpen, SpinnerGap } from "@/components/ui/icon";
+import { Plus, ChatCircle, Clock, FolderOpen, SpinnerGap, CaretRight, CaretDown } from "@/components/ui/icon";
 import { Button } from "@/components/ui/button";
 import { RemoteConnectionStatus } from "./RemoteConnectionStatus";
 import { RemoteConnectionForm } from "./RemoteConnectionForm";
@@ -361,7 +361,7 @@ export function RemoteConnectionList() {
                   </div>
                 )}
 
-                {/* Remote CLI sessions list */}
+                {/* Remote CLI sessions grouped by directory */}
                 {isConnected && (
                   <div className="border-t">
                     {isLoadingSessions ? (
@@ -370,37 +370,11 @@ export function RemoteConnectionList() {
                         {t("remote.loadingSessions")}
                       </div>
                     ) : sessions && sessions.length > 0 ? (
-                      <div className="max-h-64 overflow-y-auto">
-                        {sessions.map((s) => (
-                          <button
-                            key={s.sessionId}
-                            className="flex w-full items-start gap-3 px-4 py-2.5 text-left hover:bg-accent/50 transition-colors"
-                            onClick={() => handleOpenRemoteSession(conn.id, s)}
-                            disabled={openingSession === s.sessionId}
-                          >
-                            <FolderOpen size={14} className="mt-0.5 shrink-0 text-muted-foreground" />
-                            <div className="min-w-0 flex-1">
-                              <div className="text-sm font-medium truncate">
-                                {s.projectName}
-                              </div>
-                              <div className="text-xs text-muted-foreground truncate">
-                                {s.preview}
-                              </div>
-                              <div className="mt-0.5 flex items-center gap-3 text-[11px] text-muted-foreground/60">
-                                <span>{s.cwd}</span>
-                                <span className="flex items-center gap-0.5">
-                                  <Clock size={10} />
-                                  {new Date(s.updatedAt).toLocaleDateString()}
-                                </span>
-                                <span>{s.userMessageCount + s.assistantMessageCount} msgs</span>
-                              </div>
-                            </div>
-                            {openingSession === s.sessionId && (
-                              <SpinnerGap size={14} className="animate-spin shrink-0 text-muted-foreground" />
-                            )}
-                          </button>
-                        ))}
-                      </div>
+                      <RemoteSessionsGrouped
+                        sessions={sessions}
+                        onOpen={(s) => handleOpenRemoteSession(conn.id, s)}
+                        openingSession={openingSession}
+                      />
                     ) : sessions ? (
                       <div className="px-4 py-3 text-xs text-muted-foreground">
                         {t("remote.noRemoteSessions")}
@@ -413,6 +387,99 @@ export function RemoteConnectionList() {
           })}
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Grouped sessions sub-component ──────────────────────────────
+
+function RemoteSessionsGrouped({
+  sessions,
+  onOpen,
+  openingSession,
+}: {
+  sessions: RemoteCliSession[];
+  onOpen: (s: RemoteCliSession) => void;
+  openingSession: string | null;
+}) {
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+
+  // Group by cwd (project directory)
+  const groups = new Map<string, RemoteCliSession[]>();
+  for (const s of sessions) {
+    const key = s.cwd || s.projectPath || "unknown";
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(s);
+  }
+
+  const toggleGroup = (key: string) => {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  return (
+    <div className="max-h-80 overflow-y-auto">
+      {[...groups.entries()].map(([dir, dirSessions]) => {
+        const isCollapsed = collapsed.has(dir);
+        const dirName = dir.split("/").pop() || dir;
+
+        return (
+          <div key={dir}>
+            {/* Directory group header */}
+            <button
+              className="flex w-full items-center gap-2 px-4 py-2 text-left hover:bg-accent/30 transition-colors"
+              onClick={() => toggleGroup(dir)}
+            >
+              {isCollapsed
+                ? <CaretRight size={12} className="shrink-0 text-muted-foreground" />
+                : <CaretDown size={12} className="shrink-0 text-muted-foreground" />
+              }
+              <FolderOpen size={13} className="shrink-0 text-muted-foreground" />
+              <span className="text-xs font-medium truncate">{dirName}</span>
+              <span className="text-[11px] text-muted-foreground/50 ml-1">
+                {dirSessions.length}
+              </span>
+              <span className="text-[11px] text-muted-foreground/40 truncate ml-auto">
+                {dir}
+              </span>
+            </button>
+
+            {/* Sessions in this directory */}
+            {!isCollapsed && (
+              <div>
+                {dirSessions.map((s) => (
+                  <button
+                    key={s.sessionId}
+                    className="flex w-full items-start gap-3 pl-10 pr-4 py-2 text-left hover:bg-accent/50 transition-colors"
+                    onClick={() => onOpen(s)}
+                    disabled={openingSession === s.sessionId}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="text-xs text-muted-foreground truncate">
+                        {s.preview}
+                      </div>
+                      <div className="mt-0.5 flex items-center gap-3 text-[11px] text-muted-foreground/50">
+                        <span className="flex items-center gap-0.5">
+                          <Clock size={10} />
+                          {new Date(s.updatedAt).toLocaleDateString()}
+                        </span>
+                        <span>{s.userMessageCount + s.assistantMessageCount} msgs</span>
+                      </div>
+                    </div>
+                    {openingSession === s.sessionId && (
+                      <SpinnerGap size={14} className="animate-spin shrink-0 text-muted-foreground" />
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
