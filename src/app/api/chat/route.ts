@@ -120,23 +120,28 @@ export async function POST(request: NextRequest) {
       updateSessionModel(session_id, effectiveModel);
     }
 
-    // Resolve provider via unified resolver (same logic for chat, bridge, onboarding, etc.)
+    // Remote sessions: skip provider resolution — the remote CLI uses its own subscription/API key
+    const isRemote = !!(session as { connection_id?: string }).connection_id;
     const effectiveProviderId = provider_id || session.provider_id || '';
-    const resolved = resolveProviderUnified({
-      providerId: effectiveProviderId || undefined,
-      sessionProviderId: session.provider_id || undefined,
-      model: model || undefined,
-      sessionModel: session.model || undefined,
-    });
+    const resolved = isRemote
+      ? { provider: undefined, model: effectiveModel, upstreamModel: undefined }
+      : resolveProviderUnified({
+          providerId: effectiveProviderId || undefined,
+          sessionProviderId: session.provider_id || undefined,
+          model: model || undefined,
+          sessionModel: session.model || undefined,
+        });
     const resolvedProvider = resolved.provider;
 
-    const providerName = resolvedProvider?.name || '';
-    if (providerName !== (session.provider_name || '')) {
-      updateSessionProvider(session_id, providerName);
-    }
-    const persistProviderId = effectiveProviderId || provider_id || '';
-    if (persistProviderId !== (session.provider_id || '')) {
-      updateSessionProviderId(session_id, persistProviderId);
+    if (!isRemote) {
+      const providerName = resolvedProvider?.name || '';
+      if (providerName !== (session.provider_name || '')) {
+        updateSessionProvider(session_id, providerName);
+      }
+      const persistProviderId = effectiveProviderId || provider_id || '';
+      if (persistProviderId !== (session.provider_id || '')) {
+        updateSessionProviderId(session_id, persistProviderId);
+      }
     }
 
     // Determine permission mode from chat mode: code → acceptEdits, plan → plan, ask → default (no tools)
@@ -339,7 +344,6 @@ Start by greeting the user and asking the first question.
       systemPromptFirst200: finalSystemPrompt?.slice(0, 200) || 'none',
     });
     // Route to remote or local based on connection_id
-    const isRemote = !!(session as { connection_id?: string }).connection_id;
     const stream = isRemote
       ? streamClaudeRemote({
           prompt: content,

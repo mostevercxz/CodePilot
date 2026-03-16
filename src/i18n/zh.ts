@@ -1080,6 +1080,8 @@ const zh: Record<TranslationKey, string> = {
   'remote.form.cancel': '取消',
   'remote.form.create': '创建',
   'remote.form.update': '更新',
+  'remote.newSession': '新建会话',
+  'remote.selectWorkDir': '选择远程服务器上的工作目录：',
   'remote.session.remote': '远程',
   'remote.session.disconnected': '已断开',
 

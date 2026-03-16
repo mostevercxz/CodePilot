@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { getRemoteConnection } from '@/lib/db';
-import { encryptPassword } from '@/lib/remote/ssh-manager';
+
 import fs from 'fs';
 import path from 'path';
 import os from 'os';

@@ -1083,6 +1083,8 @@ const en = {
   'remote.form.cancel': 'Cancel',
   'remote.form.create': 'Create',
   'remote.form.update': 'Update',
+  'remote.newSession': 'New Session',
+  'remote.selectWorkDir': 'Select a working directory on the remote server:',
   'remote.session.remote': 'Remote',
   'remote.session.disconnected': 'Disconnected',
 
