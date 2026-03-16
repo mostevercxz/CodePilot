@@ -83,19 +83,22 @@ export async function deployRelay(ssh: Client, conn: RemoteConnection): Promise<
     fi
   `;
   const resolveResult = await sshExec(ssh, resolveScript);
+  console.log(`[relay-deploy] claude resolve raw output: ${JSON.stringify(resolveResult)}`);
   const claudePath = resolveResult.trim().split('\n').pop()?.trim() || '';
   if (claudePath === 'NOT_FOUND' || claudePath === '') {
-    throw new Error(`Claude CLI not found on remote at "${claudePathInput}". Please install Claude Code CLI or specify the correct path.`);
+    throw new Error(`Claude CLI not found on remote at "${claudePathInput}". Raw output: ${resolveResult.slice(0, 500)}`);
   }
   console.log(`[relay-deploy] Remote claude path: ${claudePath}`);
 
   // Derive node path from claude's directory so they use the same nvm version.
   const claudeDir = claudePath.substring(0, claudePath.lastIndexOf('/'));
   const siblingNode = `${claudeDir}/node`;
+  console.log(`[relay-deploy] Checking sibling node: ${siblingNode}`);
   const nodeCheck = await sshExec(ssh, `test -x ${siblingNode} && echo "${siblingNode}" || (${sourceProfile} which node 2>/dev/null || echo "NOT_FOUND")`);
+  console.log(`[relay-deploy] node check raw output: ${JSON.stringify(nodeCheck)}`);
   const nodePath = nodeCheck.trim().split('\n').pop()?.trim() || '';
   if (nodePath === 'NOT_FOUND' || nodePath === '') {
-    throw new Error('Node.js not found on remote. Make sure node is installed and in PATH.');
+    throw new Error(`Node.js not found on remote. claudePath=${claudePath}, siblingNode=${siblingNode}, nodeCheck raw=${nodeCheck.slice(0, 500)}`);
   }
   console.log(`[relay-deploy] Remote node path: ${nodePath}`);
 
