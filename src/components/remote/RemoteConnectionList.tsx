@@ -2,14 +2,24 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, ChatCircle, FileArrowDown } from "@/components/ui/icon";
+import { Plus, ChatCircle, Clock, FolderOpen, SpinnerGap } from "@/components/ui/icon";
 import { Button } from "@/components/ui/button";
 import { RemoteConnectionStatus } from "./RemoteConnectionStatus";
 import { RemoteConnectionForm } from "./RemoteConnectionForm";
 import { RemoteDirectoryPicker } from "./RemoteDirectoryPicker";
-import { ImportSessionDialog } from "@/components/layout/ImportSessionDialog";
 import { useTranslation } from "@/hooks/useTranslation";
 import type { RemoteConnection, RemoteConnectionRuntime } from "@/types";
+
+interface RemoteCliSession {
+  sessionId: string;
+  projectPath: string;
+  projectName: string;
+  cwd: string;
+  preview: string;
+  userMessageCount: number;
+  assistantMessageCount: number;
+  updatedAt: string;
+}
 
 export function RemoteConnectionList() {
   const { t } = useTranslation();
@@ -21,7 +31,10 @@ export function RemoteConnectionList() {
   const [loading, setLoading] = useState(true);
   const [pickingDirForId, setPickingDirForId] = useState<string | null>(null);
   const [creatingSession, setCreatingSession] = useState(false);
-  const [importingForId, setImportingForId] = useState<string | null>(null);
+  // Remote CLI sessions per connection
+  const [remoteSessions, setRemoteSessions] = useState<Record<string, RemoteCliSession[]>>({});
+  const [loadingSessions, setLoadingSessions] = useState<Set<string>>(new Set());
+  const [openingSession, setOpeningSession] = useState<string | null>(null);
 
   const fetchConnections = useCallback(async () => {
     try {
@@ -47,6 +60,24 @@ export function RemoteConnectionList() {
     }
   }, [connections]);
 
+  // Fetch remote CLI sessions for a connected server
+  const fetchRemoteSessions = useCallback(async (connectionId: string) => {
+    setLoadingSessions((prev) => new Set(prev).add(connectionId));
+    try {
+      const res = await fetch(`/api/claude-sessions?connection_id=${encodeURIComponent(connectionId)}`);
+      const data = await res.json();
+      setRemoteSessions((prev) => ({ ...prev, [connectionId]: data.sessions || [] }));
+    } catch {
+      setRemoteSessions((prev) => ({ ...prev, [connectionId]: [] }));
+    } finally {
+      setLoadingSessions((prev) => {
+        const next = new Set(prev);
+        next.delete(connectionId);
+        return next;
+      });
+    }
+  }, []);
+
   useEffect(() => {
     fetchConnections();
   }, [fetchConnections]);
@@ -58,6 +89,16 @@ export function RemoteConnectionList() {
       return () => clearInterval(interval);
     }
   }, [connections, fetchStatuses]);
+
+  // Auto-fetch remote sessions when a connection becomes connected
+  useEffect(() => {
+    for (const conn of connections) {
+      const status = statuses[conn.id];
+      if (status?.status === "connected" && !remoteSessions[conn.id] && !loadingSessions.has(conn.id)) {
+        fetchRemoteSessions(conn.id);
+      }
+    }
+  }, [connections, statuses, remoteSessions, loadingSessions, fetchRemoteSessions]);
 
   const handleConnect = async (id: string) => {
     try {
@@ -91,6 +132,8 @@ export function RemoteConnectionList() {
         ...prev,
         [id]: { connectionId: id, status: "disconnected", tunnelPort: null, error: null, connectedAt: null },
       }));
+      // Clear cached remote sessions
+      setRemoteSessions((prev) => { const next = { ...prev }; delete next[id]; return next; });
     } catch {
       // ignore
     }
@@ -154,10 +197,7 @@ export function RemoteConnectionList() {
       const res = await fetch("/api/chat/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          working_directory: remotePath,
-          connection_id: connectionId,
-        }),
+        body: JSON.stringify({ working_directory: remotePath, connection_id: connectionId }),
       });
       if (res.ok) {
         const data = await res.json();
@@ -171,6 +211,34 @@ export function RemoteConnectionList() {
       alert(`Failed to create session: ${err}`);
     } finally {
       setCreatingSession(false);
+    }
+  };
+
+  // Open a remote CLI session: create a local session backed by the remote SDK session
+  const handleOpenRemoteSession = async (connectionId: string, cliSession: RemoteCliSession) => {
+    setOpeningSession(cliSession.sessionId);
+    try {
+      const res = await fetch("/api/claude-sessions/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId: cliSession.sessionId,
+          connection_id: connectionId,
+        }),
+      });
+      const data = await res.json();
+      if (res.status === 409 && data.existingSessionId) {
+        // Already opened before — navigate to it
+        router.push(`/chat/${data.existingSessionId}`);
+      } else if (res.ok && data.session) {
+        router.push(`/chat/${data.session.id}`);
+      } else {
+        alert(data.error || "Failed to open session");
+      }
+    } catch (err) {
+      alert(`Failed to open session: ${err}`);
+    } finally {
+      setOpeningSession(null);
     }
   };
 
@@ -191,10 +259,7 @@ export function RemoteConnectionList() {
         </div>
         <Button
           size="sm"
-          onClick={() => {
-            setEditingConnection(null);
-            setShowForm(true);
-          }}
+          onClick={() => { setEditingConnection(null); setShowForm(true); }}
         >
           <Plus size={14} className="mr-1" />
           {t("remote.addConnection")}
@@ -206,10 +271,7 @@ export function RemoteConnectionList() {
           <RemoteConnectionForm
             connection={editingConnection}
             onSave={handleSave}
-            onCancel={() => {
-              setShowForm(false);
-              setEditingConnection(null);
-            }}
+            onCancel={() => { setShowForm(false); setEditingConnection(null); }}
           />
         </div>
       )}
@@ -217,12 +279,7 @@ export function RemoteConnectionList() {
       {connections.length === 0 && !showForm ? (
         <div className="flex flex-col items-center justify-center py-16 text-center">
           <p className="text-sm text-muted-foreground">{t("remote.noConnections")}</p>
-          <Button
-            variant="outline"
-            size="sm"
-            className="mt-4"
-            onClick={() => setShowForm(true)}
-          >
+          <Button variant="outline" size="sm" className="mt-4" onClick={() => setShowForm(true)}>
             <Plus size={14} className="mr-1" />
             {t("remote.addFirst")}
           </Button>
@@ -233,9 +290,12 @@ export function RemoteConnectionList() {
             const status = statuses[conn.id];
             const isConnected = status?.status === "connected";
             const isConnecting = status?.status === "connecting";
+            const sessions = remoteSessions[conn.id];
+            const isLoadingSessions = loadingSessions.has(conn.id);
 
             return (
               <div key={conn.id} className="rounded-lg border bg-card">
+                {/* Connection header */}
                 <div className="flex items-center justify-between p-4">
                   <div className="flex items-center gap-3">
                     <RemoteConnectionStatus status={status?.status || "disconnected"} />
@@ -253,73 +313,37 @@ export function RemoteConnectionList() {
 
                   <div className="flex items-center gap-2">
                     {isConnected && (
-                      <>
-                        <Button
-                          size="sm"
-                          onClick={() => {
-                            if (conn.default_working_directory) {
-                              handleNewSession(conn.id, conn.default_working_directory);
-                            } else {
-                              setPickingDirForId(pickingDirForId === conn.id ? null : conn.id);
-                            }
-                          }}
-                          disabled={creatingSession}
-                        >
-                          <ChatCircle size={14} className="mr-1" />
-                          {t("remote.newSession")}
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setImportingForId(conn.id)}
-                        >
-                          <FileArrowDown size={14} className="mr-1" />
-                          {t("remote.importSessions")}
-                        </Button>
-                      </>
+                      <Button
+                        size="sm"
+                        onClick={() => {
+                          if (conn.default_working_directory) {
+                            handleNewSession(conn.id, conn.default_working_directory);
+                          } else {
+                            setPickingDirForId(pickingDirForId === conn.id ? null : conn.id);
+                          }
+                        }}
+                        disabled={creatingSession}
+                      >
+                        <ChatCircle size={14} className="mr-1" />
+                        {t("remote.newSession")}
+                      </Button>
                     )}
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleTest(conn.id)}
-                      disabled={isConnecting}
-                    >
+                    <Button variant="outline" size="sm" onClick={() => handleTest(conn.id)} disabled={isConnecting}>
                       {t("remote.test")}
                     </Button>
                     {isConnected ? (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleDisconnect(conn.id)}
-                      >
+                      <Button variant="outline" size="sm" onClick={() => handleDisconnect(conn.id)}>
                         {t("remote.disconnect")}
                       </Button>
                     ) : (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handleConnect(conn.id)}
-                        disabled={isConnecting}
-                      >
+                      <Button size="sm" variant="outline" onClick={() => handleConnect(conn.id)} disabled={isConnecting}>
                         {isConnecting ? t("remote.connecting") : t("remote.connect")}
                       </Button>
                     )}
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        setEditingConnection(conn);
-                        setShowForm(true);
-                      }}
-                    >
+                    <Button variant="ghost" size="sm" onClick={() => { setEditingConnection(conn); setShowForm(true); }}>
                       {t("remote.edit")}
                     </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="text-destructive hover:text-destructive"
-                      onClick={() => handleDelete(conn.id)}
-                    >
+                    <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={() => handleDelete(conn.id)}>
                       {t("remote.delete")}
                     </Button>
                   </div>
@@ -328,9 +352,7 @@ export function RemoteConnectionList() {
                 {/* Remote directory picker for new session */}
                 {pickingDirForId === conn.id && isConnected && (
                   <div className="border-t px-4 py-3">
-                    <p className="mb-2 text-xs text-muted-foreground">
-                      {t("remote.selectWorkDir")}
-                    </p>
+                    <p className="mb-2 text-xs text-muted-foreground">{t("remote.selectWorkDir")}</p>
                     <RemoteDirectoryPicker
                       connectionId={conn.id}
                       initialDir={conn.default_working_directory || "~"}
@@ -338,18 +360,58 @@ export function RemoteConnectionList() {
                     />
                   </div>
                 )}
+
+                {/* Remote CLI sessions list */}
+                {isConnected && (
+                  <div className="border-t">
+                    {isLoadingSessions ? (
+                      <div className="flex items-center gap-2 px-4 py-3 text-xs text-muted-foreground">
+                        <SpinnerGap size={12} className="animate-spin" />
+                        {t("remote.loadingSessions")}
+                      </div>
+                    ) : sessions && sessions.length > 0 ? (
+                      <div className="max-h-64 overflow-y-auto">
+                        {sessions.map((s) => (
+                          <button
+                            key={s.sessionId}
+                            className="flex w-full items-start gap-3 px-4 py-2.5 text-left hover:bg-accent/50 transition-colors"
+                            onClick={() => handleOpenRemoteSession(conn.id, s)}
+                            disabled={openingSession === s.sessionId}
+                          >
+                            <FolderOpen size={14} className="mt-0.5 shrink-0 text-muted-foreground" />
+                            <div className="min-w-0 flex-1">
+                              <div className="text-sm font-medium truncate">
+                                {s.projectName}
+                              </div>
+                              <div className="text-xs text-muted-foreground truncate">
+                                {s.preview}
+                              </div>
+                              <div className="mt-0.5 flex items-center gap-3 text-[11px] text-muted-foreground/60">
+                                <span>{s.cwd}</span>
+                                <span className="flex items-center gap-0.5">
+                                  <Clock size={10} />
+                                  {new Date(s.updatedAt).toLocaleDateString()}
+                                </span>
+                                <span>{s.userMessageCount + s.assistantMessageCount} msgs</span>
+                              </div>
+                            </div>
+                            {openingSession === s.sessionId && (
+                              <SpinnerGap size={14} className="animate-spin shrink-0 text-muted-foreground" />
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    ) : sessions ? (
+                      <div className="px-4 py-3 text-xs text-muted-foreground">
+                        {t("remote.noRemoteSessions")}
+                      </div>
+                    ) : null}
+                  </div>
+                )}
               </div>
             );
           })}
         </div>
-      )}
-
-      {importingForId && (
-        <ImportSessionDialog
-          open={!!importingForId}
-          onOpenChange={(open) => { if (!open) setImportingForId(null); }}
-          connectionId={importingForId}
-        />
       )}
     </div>
   );
