@@ -95,8 +95,9 @@ export async function POST(_request: NextRequest, { params }: { params: Promise<
       };
 
       if (conn.auth_method === 'key') {
-        const keyPath = conn.private_key_path || path.join(os.homedir(), '.ssh', 'id_rsa');
-        log(`Key path: ${keyPath}, exists: ${fs.existsSync(keyPath)}`);
+        const rawKeyPath = conn.private_key_path || '~/.ssh/id_rsa';
+        const keyPath = rawKeyPath.startsWith('~') ? path.join(os.homedir(), rawKeyPath.slice(1)) : rawKeyPath;
+        log(`Key path: ${rawKeyPath} → ${keyPath}, exists: ${fs.existsSync(keyPath)}`);
         if (fs.existsSync(keyPath)) {
           config.privateKey = fs.readFileSync(keyPath);
           log(`Key loaded, ${(config.privateKey as Buffer).length} bytes`);

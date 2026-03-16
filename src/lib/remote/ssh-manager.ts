@@ -208,8 +208,9 @@ class SSHManager {
     };
 
     if (conn.auth_method === 'key') {
-      const keyPath = conn.private_key_path || path.join(os.homedir(), '.ssh', 'id_rsa');
-      logStream.write(`[${timestamp()}] Key path: ${keyPath}, exists: ${fs.existsSync(keyPath)}\n`);
+      const rawKeyPath = conn.private_key_path || '~/.ssh/id_rsa';
+      const keyPath = rawKeyPath.startsWith('~') ? path.join(os.homedir(), rawKeyPath.slice(1)) : rawKeyPath;
+      logStream.write(`[${timestamp()}] Key path: ${rawKeyPath} → ${keyPath}, exists: ${fs.existsSync(keyPath)}\n`);
       if (fs.existsSync(keyPath)) {
         config.privateKey = fs.readFileSync(keyPath);
         logStream.write(`[${timestamp()}] Key loaded, ${config.privateKey.length} bytes\n`);
