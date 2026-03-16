@@ -430,6 +430,76 @@ export function parseClaudeSession(sessionId: string): ParsedSession | null {
 }
 
 /**
+ * Parse a Claude Code session from raw JSONL content string (for remote sessions).
+ */
+export function parseClaudeSessionFromContent(sessionId: string, content: string): ParsedSession | null {
+  const lines = content.split('\n').filter(l => l.trim());
+  if (lines.length === 0) return null;
+
+  const messages: ParsedMessage[] = [];
+  let cwd = '';
+  let gitBranch = '';
+  let version = '';
+  let preview = '';
+  let createdAt = '';
+  let updatedAt = '';
+  let userMessageCount = 0;
+  let assistantMessageCount = 0;
+
+  for (const line of lines) {
+    try {
+      const entry = JSON.parse(line) as JournalEntry;
+
+      if (entry.timestamp) {
+        if (!createdAt) createdAt = entry.timestamp as string;
+        updatedAt = entry.timestamp as string;
+      }
+
+      if (entry.type === 'user') {
+        const userEntry = entry as UserEntry;
+        userMessageCount++;
+        if (!cwd && userEntry.cwd) cwd = userEntry.cwd;
+        if (!gitBranch && userEntry.gitBranch) gitBranch = userEntry.gitBranch;
+        if (!version && userEntry.version) version = userEntry.version;
+        if (!preview && userEntry.message?.content) {
+          const msgContent = userEntry.message.content;
+          if (typeof msgContent === 'string') preview = msgContent.slice(0, 120);
+          else if (Array.isArray(msgContent)) {
+            const tb = msgContent.find(b => b.type === 'text');
+            if (tb?.text) preview = tb.text.slice(0, 120);
+          }
+        }
+        const parsed = parseUserMessage(userEntry);
+        if (parsed) messages.push(parsed);
+      } else if (entry.type === 'assistant') {
+        assistantMessageCount++;
+        const parsed = parseAssistantMessage(entry as AssistantEntry);
+        if (parsed) messages.push(parsed);
+      }
+    } catch { /* skip */ }
+  }
+
+  if (userMessageCount === 0 && assistantMessageCount === 0) return null;
+
+  const info: ClaudeSessionInfo = {
+    sessionId,
+    projectPath: cwd || '',
+    projectName: cwd ? path.basename(cwd) : sessionId,
+    cwd: cwd || '',
+    gitBranch: gitBranch || '',
+    version: version || '',
+    preview: preview || '(no preview)',
+    userMessageCount,
+    assistantMessageCount,
+    createdAt: createdAt || new Date().toISOString(),
+    updatedAt: updatedAt || new Date().toISOString(),
+    fileSize: Buffer.byteLength(content, 'utf-8'),
+  };
+
+  return { info, messages };
+}
+
+/**
  * Parse a user message entry into a ParsedMessage.
  */
 function parseUserMessage(entry: UserEntry): ParsedMessage | null {

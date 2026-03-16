@@ -43,6 +43,7 @@ interface ClaudeSessionInfo {
 interface ImportSessionDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  connectionId?: string;
 }
 
 function formatRelativeTime(dateStr: string): { key: 'import.justNow' | 'import.minutesAgo' | 'import.hoursAgo' | 'import.daysAgo'; params?: Record<string, number> } | string {
@@ -69,6 +70,7 @@ function formatFileSize(bytes: number): string {
 export function ImportSessionDialog({
   open,
   onOpenChange,
+  connectionId,
 }: ImportSessionDialogProps) {
   const router = useRouter();
   const { t } = useTranslation();
@@ -82,7 +84,10 @@ export function ImportSessionDialog({
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/claude-sessions");
+      const url = connectionId
+        ? `/api/claude-sessions?connection_id=${encodeURIComponent(connectionId)}`
+        : "/api/claude-sessions";
+      const res = await fetch(url);
       if (!res.ok) {
         const data = await res.json();
         throw new Error(data.error || "Failed to fetch sessions");
@@ -109,7 +114,7 @@ export function ImportSessionDialog({
       const res = await fetch("/api/claude-sessions/import", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId }),
+        body: JSON.stringify({ sessionId, connection_id: connectionId }),
       });
 
       const data = await res.json();

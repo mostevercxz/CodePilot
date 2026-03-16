@@ -1,11 +1,12 @@
 import { NextRequest } from 'next/server';
-import { parseClaudeSession } from '@/lib/claude-session-parser';
+import { parseClaudeSession, parseClaudeSessionFromContent } from '@/lib/claude-session-parser';
 import { createSession, addMessage, updateSdkSessionId, getAllSessions } from '@/lib/db';
+import { sshManager } from '@/lib/remote/ssh-manager';
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { sessionId } = body;
+    const { sessionId, connection_id } = body;
 
     if (!sessionId) {
       return Response.json(
@@ -27,7 +28,24 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const parsed = parseClaudeSession(sessionId);
+    let parsed;
+
+    if (connection_id) {
+      // Remote: fetch session content from relay
+      const tunnelPort = sshManager.getTunnelPort(connection_id);
+      if (!tunnelPort) {
+        return Response.json({ error: 'Not connected to remote' }, { status: 400 });
+      }
+      const resp = await fetch(`http://127.0.0.1:${tunnelPort}/claude-sessions/read?sessionId=${encodeURIComponent(sessionId)}`);
+      const data = await resp.json();
+      if (data.error) {
+        return Response.json({ error: data.error }, { status: 404 });
+      }
+      parsed = parseClaudeSessionFromContent(sessionId, data.content);
+    } else {
+      parsed = parseClaudeSession(sessionId);
+    }
+
     if (!parsed) {
       return Response.json(
         { error: `Session "${sessionId}" not found or could not be parsed` },
@@ -57,6 +75,9 @@ export async function POST(request: NextRequest) {
       undefined, // system prompt
       info.cwd || info.projectPath,
       'code',
+      undefined, // providerId
+      undefined, // permissionProfile
+      connection_id || undefined,
     );
 
     // Store the original Claude Code SDK session ID so the conversation can be resumed
@@ -64,8 +85,6 @@ export async function POST(request: NextRequest) {
 
     // Import all messages
     for (const msg of messages) {
-      // For assistant messages with tool blocks, store as structured JSON
-      // For text-only messages, store as plain text (consistent with CodePilot's convention)
       const content = msg.hasToolBlocks
         ? JSON.stringify(msg.contentBlocks)
         : msg.content;

@@ -2,11 +2,12 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, ChatCircle } from "@/components/ui/icon";
+import { Plus, ChatCircle, FileArrowDown } from "@/components/ui/icon";
 import { Button } from "@/components/ui/button";
 import { RemoteConnectionStatus } from "./RemoteConnectionStatus";
 import { RemoteConnectionForm } from "./RemoteConnectionForm";
 import { RemoteDirectoryPicker } from "./RemoteDirectoryPicker";
+import { ImportSessionDialog } from "@/components/layout/ImportSessionDialog";
 import { useTranslation } from "@/hooks/useTranslation";
 import type { RemoteConnection, RemoteConnectionRuntime } from "@/types";
 
@@ -20,6 +21,7 @@ export function RemoteConnectionList() {
   const [loading, setLoading] = useState(true);
   const [pickingDirForId, setPickingDirForId] = useState<string | null>(null);
   const [creatingSession, setCreatingSession] = useState(false);
+  const [importingForId, setImportingForId] = useState<string | null>(null);
 
   const fetchConnections = useCallback(async () => {
     try {
@@ -251,20 +253,30 @@ export function RemoteConnectionList() {
 
                   <div className="flex items-center gap-2">
                     {isConnected && (
-                      <Button
-                        size="sm"
-                        onClick={() => {
-                          if (conn.default_working_directory) {
-                            handleNewSession(conn.id, conn.default_working_directory);
-                          } else {
-                            setPickingDirForId(pickingDirForId === conn.id ? null : conn.id);
-                          }
-                        }}
-                        disabled={creatingSession}
-                      >
-                        <ChatCircle size={14} className="mr-1" />
-                        {t("remote.newSession")}
-                      </Button>
+                      <>
+                        <Button
+                          size="sm"
+                          onClick={() => {
+                            if (conn.default_working_directory) {
+                              handleNewSession(conn.id, conn.default_working_directory);
+                            } else {
+                              setPickingDirForId(pickingDirForId === conn.id ? null : conn.id);
+                            }
+                          }}
+                          disabled={creatingSession}
+                        >
+                          <ChatCircle size={14} className="mr-1" />
+                          {t("remote.newSession")}
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setImportingForId(conn.id)}
+                        >
+                          <FileArrowDown size={14} className="mr-1" />
+                          {t("remote.importSessions")}
+                        </Button>
+                      </>
                     )}
                     <Button
                       variant="outline"
@@ -330,6 +342,14 @@ export function RemoteConnectionList() {
             );
           })}
         </div>
+      )}
+
+      {importingForId && (
+        <ImportSessionDialog
+          open={!!importingForId}
+          onOpenChange={(open) => { if (!open) setImportingForId(null); }}
+          connectionId={importingForId}
+        />
       )}
     </div>
   );

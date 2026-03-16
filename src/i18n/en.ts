@@ -1084,6 +1084,7 @@ const en = {
   'remote.form.create': 'Create',
   'remote.form.update': 'Update',
   'remote.newSession': 'New Session',
+  'remote.importSessions': 'Import',
   'remote.selectWorkDir': 'Select a working directory on the remote server:',
   'remote.session.remote': 'Remote',
   'remote.session.disconnected': 'Disconnected',

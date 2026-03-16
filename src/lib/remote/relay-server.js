@@ -453,6 +453,138 @@ function handleBrowseDirectories(req, res) {
   }
 }
 
+// ── Claude Sessions ─────────────────────────────────────────────────
+
+function getClaudeProjectsDir() {
+  return path.join(process.env.HOME || '/tmp', '.claude', 'projects');
+}
+
+function decodeProjectPath(encodedName) {
+  if (!encodedName.startsWith('-')) return encodedName;
+  return encodedName.replace(/^-/, '/').replace(/-/g, '/');
+}
+
+function handleClaudeSessions(req, res) {
+  const projectsDir = getClaudeProjectsDir();
+  if (!fs.existsSync(projectsDir)) {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ sessions: [] }));
+    return;
+  }
+
+  const sessions = [];
+  try {
+    const projectDirs = fs.readdirSync(projectsDir, { withFileTypes: true });
+    for (const projectDir of projectDirs) {
+      if (!projectDir.isDirectory()) continue;
+      const projectPath = path.join(projectsDir, projectDir.name);
+      const decodedPath = decodeProjectPath(projectDir.name);
+      try {
+        const files = fs.readdirSync(projectPath).filter(f => f.endsWith('.jsonl'));
+        for (const jsonlFile of files) {
+          const filePath = path.join(projectPath, jsonlFile);
+          const sessionId = jsonlFile.replace('.jsonl', '');
+          try {
+            const stat = fs.statSync(filePath);
+            if (stat.size > 50 * 1024 * 1024) continue;
+            const content = fs.readFileSync(filePath, 'utf-8');
+            const lines = content.split('\n').filter(l => l.trim());
+            if (lines.length === 0) continue;
+
+            let cwd = '', gitBranch = '', version = '', preview = '';
+            let createdAt = '', updatedAt = '';
+            let userCount = 0, assistantCount = 0;
+
+            for (const line of lines) {
+              try {
+                const entry = JSON.parse(line);
+                if (entry.timestamp) {
+                  if (!createdAt) createdAt = entry.timestamp;
+                  updatedAt = entry.timestamp;
+                }
+                if (entry.type === 'user') {
+                  userCount++;
+                  if (!cwd && entry.cwd) cwd = entry.cwd;
+                  if (!gitBranch && entry.gitBranch) gitBranch = entry.gitBranch;
+                  if (!version && entry.version) version = entry.version;
+                  if (!preview && entry.message?.content) {
+                    const mc = entry.message.content;
+                    if (typeof mc === 'string') preview = mc.slice(0, 120);
+                    else if (Array.isArray(mc)) {
+                      const tb = mc.find(b => b.type === 'text');
+                      if (tb?.text) preview = tb.text.slice(0, 120);
+                    }
+                  }
+                } else if (entry.type === 'assistant') {
+                  assistantCount++;
+                }
+              } catch { /* skip */ }
+            }
+
+            if (userCount === 0 && assistantCount === 0) continue;
+            const effectivePath = cwd || decodedPath;
+            sessions.push({
+              sessionId, projectPath: effectivePath,
+              projectName: path.basename(effectivePath),
+              cwd: effectivePath, gitBranch, version,
+              preview: preview || '(no preview)',
+              userMessageCount: userCount, assistantMessageCount: assistantCount,
+              createdAt: createdAt || stat.birthtime.toISOString(),
+              updatedAt: updatedAt || stat.mtime.toISOString(),
+              fileSize: stat.size,
+            });
+          } catch { /* skip */ }
+        }
+      } catch { /* skip */ }
+    }
+  } catch { /* skip */ }
+
+  sessions.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ sessions }));
+}
+
+function handleClaudeSessionRead(req, res) {
+  const query = parseQuery(req.url);
+  const sessionId = query.sessionId;
+  if (!sessionId) {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'sessionId is required' }));
+    return;
+  }
+
+  const projectsDir = getClaudeProjectsDir();
+  if (!fs.existsSync(projectsDir)) {
+    res.writeHead(404, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'No Claude sessions found' }));
+    return;
+  }
+
+  // Find the session file
+  let sessionFile = null;
+  const projectDirs = fs.readdirSync(projectsDir, { withFileTypes: true });
+  for (const dir of projectDirs) {
+    if (!dir.isDirectory()) continue;
+    const candidate = path.join(projectsDir, dir.name, sessionId + '.jsonl');
+    if (fs.existsSync(candidate)) { sessionFile = candidate; break; }
+  }
+
+  if (!sessionFile) {
+    res.writeHead(404, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Session not found' }));
+    return;
+  }
+
+  try {
+    const content = fs.readFileSync(sessionFile, 'utf-8');
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ content }));
+  } catch (err) {
+    res.writeHead(500, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: err.message }));
+  }
+}
+
 // ── HTTP Server ─────────────────────────────────────────────────────
 
 async function main() {
@@ -480,6 +612,10 @@ async function main() {
         handleGitStatus(req, res);
       } else if (req.method === 'GET' && url === '/files/browse') {
         handleBrowseDirectories(req, res);
+      } else if (req.method === 'GET' && url === '/claude-sessions') {
+        handleClaudeSessions(req, res);
+      } else if (req.method === 'GET' && url === '/claude-sessions/read') {
+        handleClaudeSessionRead(req, res);
       } else {
         res.writeHead(404, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'Not found' }));
