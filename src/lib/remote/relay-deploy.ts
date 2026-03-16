@@ -70,6 +70,18 @@ export async function deployRelay(ssh: Client, conn: RemoteConnection): Promise<
   const claudePath = whichResult.trim();
   console.log(`[relay-deploy] Remote claude path: ${claudePath}`);
 
+  // Check proxy env vars are set on remote
+  const proxyCheck = await sshExec(ssh, `${sourceProfile} echo "http=\${http_proxy:-\${HTTP_PROXY:-}}" "https=\${https_proxy:-\${HTTPS_PROXY:-}}"`);
+  const proxyParts = proxyCheck.trim();
+  const hasHttpProxy = !proxyParts.includes('http= ') && !proxyParts.startsWith('http= ');
+  const hasHttpsProxy = !proxyParts.endsWith('https=');
+  if (!hasHttpProxy && !hasHttpsProxy) {
+    throw new Error(
+      'Proxy not configured on remote server. Please set http_proxy and https_proxy in ~/.bashrc on the remote machine, then reconnect.'
+    );
+  }
+  console.log(`[relay-deploy] Remote proxy: ${proxyParts}`);
+
   // Start relay with full profile sourced (for PATH, proxy env vars, etc.)
   // Use full paths for both node and claude to avoid PATH issues
   const startResult = await sshExec(ssh,
