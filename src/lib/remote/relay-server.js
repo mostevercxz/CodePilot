@@ -13,7 +13,7 @@ const path = require('path');
 const { execSync, spawn } = require('child_process');
 const crypto = require('crypto');
 
-const RELAY_VERSION = '1.4.0';
+const RELAY_VERSION = '1.5.0';
 const CLAUDE_BINARY = process.env.CLAUDE_BINARY || 'claude';
 const RELAY_LOG = path.join(__dirname, 'relay-debug.log');
 
@@ -138,6 +138,9 @@ async function handleChatMessages(req, res) {
   });
 
   activeSessions.set(sessionId, { process: proc, abortController });
+
+  // Close stdin so claude doesn't wait for EOF
+  proc.stdin.end();
 
   // Collect full stdout (json format returns a single JSON object)
   let stdout = '';
