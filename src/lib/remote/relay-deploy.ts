@@ -61,19 +61,30 @@ export async function deployRelay(ssh: Client, conn: RemoteConnection): Promise<
   ].join('; ') + ';';
 
   // Resolve claude to the real binary (skip shell wrappers).
-  // Search PATH + nvm bin dirs explicitly.
+  // Handles both command names ("claude") and full paths ("/home/user/.local/bin/claude").
   const claudePathInput = conn.claude_binary_path || 'claude';
   const resolveResult = await sshExec(ssh, `
     ${sourceProfile}
-    CANDIDATES=$(which -a ${claudePathInput} 2>/dev/null)
+    INPUT="${claudePathInput}"
+    CANDIDATES=""
+    # If input is a full path, use it directly; otherwise use which
+    case "$INPUT" in
+      /*) [ -x "$INPUT" ] && CANDIDATES="$INPUT" ;;
+      *)  CANDIDATES=$(which -a "$INPUT" 2>/dev/null) ;;
+    esac
+    # Also search nvm bin dirs for the base command name
+    BASE=$(basename "$INPUT")
     for d in $HOME/.nvm/versions/node/*/bin; do
-      [ -x "$d/${claudePathInput}" ] && CANDIDATES="$CANDIDATES $d/${claudePathInput}"
+      [ -x "$d/$BASE" ] && CANDIDATES="$CANDIDATES $d/$BASE"
     done
+    # Pick the first non-script candidate
     for c in $CANDIDATES; do
       ftype=$(file -b "$c" 2>/dev/null)
       case "$ftype" in *script*) ;; *) echo "$c"; exit 0 ;; esac
     done
-    which ${claudePathInput} 2>/dev/null || echo "NOT_FOUND"
+    # Fallback: first candidate even if it's a script
+    for c in $CANDIDATES; do echo "$c"; exit 0; done
+    echo "NOT_FOUND"
   `);
   const claudePath = resolveResult.trim().split('\n').pop()?.trim() || '';
   if (claudePath === 'NOT_FOUND' || claudePath === '') {
